@@ -1,5 +1,6 @@
 // src/services/student-course-service.ts
 import { apiClient, useMockData } from '@/lib/api-client'
+import { shouldUseMockData } from '@/utils/env-config'
 import { 
   Course, 
   Video,
@@ -11,8 +12,17 @@ import {
 import { mockCourses } from '@/data/mock/courses'
 
 export class StudentCourseService {
+  // Test method to simulate AI limit exceeded error
+  async simulateRateLimitError(): Promise<ServiceResult<Course[]>> {
+    console.log('🧪 Simulating AI rate limit error for testing')
+    return { error: 'rate_limit_exceeded' }
+  }
+
   async getEnrolledCourses(userId: string): Promise<ServiceResult<Course[]>> {
-    if (useMockData) {
+    const useMock = shouldUseMockData()
+    console.log('🔧 StudentCourseService.getEnrolledCourses - using mock data:', useMock)
+    
+    if (useMock) {
       // Transform mock courses to match domain Course type
       const transformedCourses: Course[] = mockCourses.slice(0, 2).map(course => ({
         id: course.id,
@@ -301,7 +311,11 @@ export class StudentCourseService {
     console.log('🔍 StudentCourseService.getCourseById called with:', courseId)
     console.log('📊 Available mock courses:', mockCourses.map(c => ({ id: c.id, title: c.title, videosCount: c.videos.length })))
     
-    if (useMockData) {
+    const useMock = shouldUseMockData()
+    console.log('🔧 StudentCourseService.getCourseById - using mock data:', useMock)
+    console.log('🌐 API Base URL:', process.env.NEXT_PUBLIC_API_URL)
+    
+    if (useMock) {
       const course = mockCourses.find(c => c.id === courseId)
       console.log('🎯 Found course:', course ? { id: course.id, title: course.title, videosCount: course.videos.length } : 'NOT FOUND')
       if (!course) {
@@ -352,7 +366,12 @@ export class StudentCourseService {
     }
 
     try {
-      const response = await apiClient.get<any>(`/api/v1/courses/${courseId}`)
+      const endpoint = `/api/v1/courses/${courseId}`
+      console.log('🌐 Calling API endpoint:', endpoint)
+      
+      const response = await apiClient.get<any>(endpoint)
+      console.log('🌐 Raw response status:', response.status)
+      console.log('🌐 Raw response object:', response)
       
       if (response.error) {
         console.log('❌ API error:', response.error)
@@ -365,44 +384,69 @@ export class StudentCourseService {
       }
       
       console.log('✅ Raw API response:', response.data)
+      console.log('✅ Raw API response type:', typeof response.data)
+      console.log('✅ Raw API response keys:', Object.keys(response.data || {}))
       
       // Transform API response to frontend Course structure
       const apiCourse = response.data
+      
+      console.log('👨‍🏫 Raw instructor data:', apiCourse.instructor)
+      console.log('👨‍🏫 Instructor exists:', !!apiCourse.instructor)
+      
+      if (!apiCourse.instructor) {
+        console.error('❌ No instructor data in API response!')
+        return { error: 'No instructor data found' }
+      }
+      
+      console.log('👨‍🏫 Instructor keys:', Object.keys(apiCourse.instructor || {}))
+      
+      const transformedInstructor = {
+        id: apiCourse.instructor.supabase_user_id || '',
+        name: apiCourse.instructor.full_name || apiCourse.instructor.display_name || 'Unknown Instructor',
+        email: apiCourse.instructor.email || '',
+        avatar: apiCourse.instructor.avatar_url || ''
+      }
+      
+      console.log('🔧 AFTER TRANSFORMATION - Transformed instructor:', transformedInstructor)
+      
       const transformedCourse: Course = {
         id: apiCourse.id,
         title: apiCourse.title,
         description: apiCourse.description,
-        shortDescription: apiCourse.shortDescription,
-        thumbnailUrl: apiCourse.thumbnailUrl,
-        instructor: {
-          id: apiCourse.instructor.id,
-          name: apiCourse.instructor.name,
-          email: apiCourse.instructor.email,
-          avatar: apiCourse.instructor.avatarUrl
-        },
-        price: apiCourse.price || 0,
+        shortDescription: apiCourse.short_description,
+        thumbnailUrl: apiCourse.thumbnail || '',
+        instructor: transformedInstructor,
+        price: parseFloat(apiCourse.price) || 0,
         currency: apiCourse.currency || 'USD',
         duration: apiCourse.duration || 0,
         difficulty: apiCourse.difficulty,
         language: apiCourse.language || 'en',
         tags: apiCourse.tags || [],
-        category: apiCourse.category,
-        rating: apiCourse.ratingAverage || 0,
-        reviewCount: apiCourse.ratingCount || 0,
-        enrollmentCount: apiCourse.enrollmentCount || 0,
-        isPublished: apiCourse.isPublished,
-        isFree: apiCourse.isFree,
-        createdAt: apiCourse.createdAt,
-        updatedAt: apiCourse.updatedAt,
+        category: apiCourse.category?.name || apiCourse.category,
+        rating: apiCourse.rating_average || 0,
+        reviewCount: apiCourse.rating_count || 0,
+        enrollmentCount: apiCourse.enrollment_count || 0,
+        isPublished: apiCourse.is_published || false,
+        isFree: apiCourse.is_free || false,
+        createdAt: apiCourse.created_at || new Date().toISOString(),
+        updatedAt: apiCourse.updated_at || new Date().toISOString(),
         // Keep original videos array for backward compatibility (but get videos from sections)
         videos: [],
         sections: apiCourse.sections || []
       }
       
       console.log('✅ Transformed course:', transformedCourse)
-      console.log('📊 Sections found:', transformedCourse.sections.length)
+      console.log('📊 Sections found:', transformedCourse.sections?.length || 0)
+      console.log('👨‍🏫 Transformed instructor:', transformedCourse.instructor)
+      console.log('🔍 Transformed instructor name:', transformedCourse.instructor.name)
+      console.log('🔍 Returning course data with ID:', transformedCourse.id)
+      console.log('🔧 FINAL COURSE INSTRUCTOR:', JSON.stringify(transformedCourse.instructor, null, 2))
       
-      return { data: transformedCourse }
+      // Double check the returned object structure
+      const returnValue = { data: transformedCourse }
+      console.log('🔄 Final return value:', returnValue)
+      
+      return returnValue
     } catch (error) {
       console.error('❌ Error in getCourseById:', error)
       return { error: 'Network error while fetching course' }
@@ -584,7 +628,7 @@ export class StudentCourseService {
     )
     return response.error
       ? { error: response.error }
-      : { data: response.data }
+      : { data: response.data || { certificateUrl: '' } }
   }
 
   // New API endpoints from documentation
@@ -694,27 +738,6 @@ export class StudentCourseService {
       : { data: response.data }
   }
 
-  async submitCourseReview(courseId: string, rating: number, review: string): Promise<ServiceResult<any>> {
-    if (useMockData) {
-      return {
-        data: {
-          id: `review_${Date.now()}`,
-          course_id: courseId,
-          rating,
-          review,
-          created_at: new Date().toISOString()
-        }
-      }
-    }
-
-    const response = await apiClient.post(`/api/v1/student/courses/${courseId}/review/`, {
-      rating,
-      review
-    })
-    return response.error
-      ? { error: response.error }
-      : { data: response.data }
-  }
 
   async updateCourseReview(courseId: string, reviewId: string, rating: number, review: string): Promise<ServiceResult<any>> {
     if (useMockData) {
@@ -746,7 +769,7 @@ export class StudentCourseService {
     const response = await apiClient.delete(`/api/v1/student/courses/${courseId}/review/${reviewId}/`)
     return response.error
       ? { error: response.error }
-      : { data: response.data }
+      : { data: undefined }
   }
 }
 

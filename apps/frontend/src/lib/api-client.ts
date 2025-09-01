@@ -2,8 +2,12 @@
 // Centralized API client with mock data support
 
 import { handle401Error } from '@/utils/auth-redirect'
+import { shouldUseMockData, getApiBaseUrl, logEnvironmentConfig } from '@/utils/env-config'
 
-export const useMockData = process.env.NEXT_PUBLIC_USE_MOCK_DATA === 'true' || false // Default to real API
+export const useMockData = shouldUseMockData()
+
+// Log environment configuration on import
+logEnvironmentConfig()
 
 interface ApiResponse<T> {
   data?: T
@@ -20,7 +24,7 @@ class ApiClient {
   private baseUrl: string
   
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+    this.baseUrl = getApiBaseUrl()
   }
   
   async get<T>(endpoint: string, options?: ApiOptions): Promise<ApiResponse<T>> {
@@ -95,7 +99,7 @@ class ApiClient {
                 data: rateLimitData
               }
             } catch {
-              return { error: 'Rate limit exceeded', status: 429 }
+              return { error: 'rate_limit_exceeded', status: 429 }
             }
           
           case 500:

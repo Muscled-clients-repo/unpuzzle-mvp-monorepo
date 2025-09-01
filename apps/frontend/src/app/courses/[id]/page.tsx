@@ -40,31 +40,35 @@ export default function CoursePreviewPage() {
   // State for enrollment dialog
   const [showEnrollDialog, setShowEnrollDialog] = useState(false)
   
-  // Use the public course slice for fetching course data
+  // Use the student course slice for fetching course data
   const { 
     enrolledCourses,
     loadEnrolledCourses,
-    currentCourse: publicCourse,
-    loadCourseById: loadPublicCourse,
-    loadingCourse: loadingPublicCourse,
+    currentCourse,
+    loadCourseById,
+    loading,
     error
   } = useAppStore()
   
   // Load course data
   useEffect(() => {
-    loadPublicCourse(courseId) // Load public course details
+    loadCourseById(courseId) // Load course details
     loadEnrolledCourses('guest') // Check if user is already enrolled
-  }, [courseId, loadPublicCourse, loadEnrolledCourses])
+  }, [courseId, loadCourseById, loadEnrolledCourses])
   
-  // Use public course data
-  const course = publicCourse
-  const instructor = course?.instructor
-  const isLoadingCourse = loadingPublicCourse
+  // Use course data from store
+  const course = currentCourse
   
-  // Debug logging
-  console.log('🔍 Course data:', course)
-  console.log('👨‍🏫 Instructor data:', instructor)
-  console.log('📝 Instructor name:', instructor?.name)
+  // Transform instructor data if it's in raw API format
+  const instructor = course?.instructor ? {
+    id: (course.instructor as any).supabase_user_id || (course.instructor as any).id,
+    name: (course.instructor as any).full_name || (course.instructor as any).display_name || (course.instructor as any).name,
+    email: (course.instructor as any).email || '',
+    avatar: (course.instructor as any).avatar_url || (course.instructor as any).avatar || ''
+  } : course?.instructor
+  const isLoadingCourse = loading
+  
+  
   
   // Check enrollment status using new store
   const isEnrolled = enrolledCourses.some(c => c.id === courseId)

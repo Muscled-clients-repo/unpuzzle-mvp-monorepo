@@ -229,12 +229,12 @@ export function AICourseCard({
         <div className="mt-3 flex items-center justify-between border-t pt-3">
           <div className="flex items-center gap-2">
             <Image
-              src={course.instructor?.avatar || "/placeholder-avatar.jpg"}
+              src={course.instructor?.avatar || "https://api.dicebear.com/7.x/avataaars/svg?seed=instructor"}
               alt={course.instructor?.name || "Instructor"}
               width={24}
               height={24}
               className="rounded-full"
-              unoptimized={course.instructor?.avatar?.includes('dicebear.com') || course.instructor?.avatar?.includes('/svg') || false}
+              unoptimized={course.instructor?.avatar?.includes('dicebear.com') || course.instructor?.avatar?.includes('/svg') || true}
             />
             <span className="text-xs text-muted-foreground">
               {course.instructor?.name || "Unknown Instructor"}

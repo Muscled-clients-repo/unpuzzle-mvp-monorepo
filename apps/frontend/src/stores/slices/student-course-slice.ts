@@ -2,6 +2,7 @@
 import { StateCreator } from 'zustand'
 import { Course, CourseProgress } from '@/types/domain'
 import { studentCourseService } from '@/services/student-course-service'
+import { handleServiceError } from '@/utils/api-error-handler'
 
 export interface StudentCourseState {
   enrolledCourses: Course[]
@@ -9,7 +10,7 @@ export interface StudentCourseState {
   currentCourse: Course | null
   courseProgress: Record<string, CourseProgress> // Store progress per course
   loading: boolean
-  error: string | null
+  error: string | object | null
   // Operation-specific loading states
   enrollingCourseId: string | null
   unenrollingCourseId: string | null
@@ -22,6 +23,7 @@ export interface StudentCourseActions {
   loadRecommendedCourses: (userId: string) => Promise<void>
   loadAllCourses: () => Promise<void>
   loadCourseById: (courseId: string) => Promise<void>
+  loadStudentCourseById: (courseId: string) => Promise<void>
   loadCourseProgress: (courseId: string) => Promise<void>
   enrollInCourse: (userId: string, courseId: string, paymentData?: { paymentMethod?: string; couponCode?: string }) => Promise<void>
   unenrollFromCourse: (courseId: string) => Promise<void>
@@ -56,7 +58,8 @@ export const createStudentCourseSlice: StateCreator<StudentCourseSlice> = (set, 
       
       if (result.error) {
         console.error('Error loading enrolled courses:', result.error)
-        set({ loading: false, error: result.error, enrolledCourses: [] })
+        const errorObj = handleServiceError(result.error)
+        set({ loading: false, error: errorObj, enrolledCourses: [] })
       } else {
         // Ensure we always set an array
         const courses = Array.isArray(result.data) ? result.data : []
@@ -65,7 +68,8 @@ export const createStudentCourseSlice: StateCreator<StudentCourseSlice> = (set, 
       }
     } catch (error) {
       console.error('Exception loading enrolled courses:', error)
-      set({ loading: false, error: 'Failed to load courses', enrolledCourses: [] })
+      const errorObj = handleServiceError('Failed to load courses')
+      set({ loading: false, error: errorObj, enrolledCourses: [] })
     }
   },
 
@@ -75,7 +79,8 @@ export const createStudentCourseSlice: StateCreator<StudentCourseSlice> = (set, 
     const result = await studentCourseService.getRecommendedCourses(userId)
     
     if (result.error) {
-      set({ loading: false, error: result.error })
+      const errorObj = handleServiceError(result.error)
+      set({ loading: false, error: errorObj })
     } else {
       set({ loading: false, recommendedCourses: result.data || [], error: null })
     }
@@ -87,21 +92,50 @@ export const createStudentCourseSlice: StateCreator<StudentCourseSlice> = (set, 
     const result = await studentCourseService.getAllCourses()
     
     if (result.error) {
-      set({ loading: false, error: result.error })
+      const errorObj = handleServiceError(result.error)
+      set({ loading: false, error: errorObj })
     } else {
       set({ loading: false, recommendedCourses: result.data || [], error: null })
     }
   },
 
   loadCourseById: async (courseId: string) => {
+    console.log('🏪 Store: loadCourseById called with:', courseId)
     set({ loading: true, error: null })
     
     const result = await studentCourseService.getCourseById(courseId)
+    console.log('🏪 Store: Service result:', result)
     
     if (result.error) {
-      set({ loading: false, error: result.error })
+      console.log('🏪 Store: Error occurred:', result.error)
+      const errorObj = handleServiceError(result.error)
+      set({ loading: false, error: errorObj })
     } else {
+      console.log('🏪 Store: Setting course data:', result.data)
       set({ loading: false, currentCourse: result.data || null, error: null })
+      
+      // Verify the state was set
+      console.log('🏪 Store: Current course after setting:', get().currentCourse)
+    }
+  },
+
+  loadStudentCourseById: async (courseId: string) => {
+    console.log('🏪 Store: loadStudentCourseById called with:', courseId)
+    set({ loading: true, error: null })
+    
+    const result = await studentCourseService.getCourseById(courseId)
+    console.log('🏪 Store: Student service result:', result)
+    
+    if (result.error) {
+      console.log('🏪 Store: Student Error occurred:', result.error)
+      const errorObj = handleServiceError(result.error)
+      set({ loading: false, error: errorObj })
+    } else {
+      console.log('🏪 Store: Student Setting course data:', result.data)
+      set({ loading: false, currentCourse: result.data || null, error: null })
+      
+      // Verify the state was set
+      console.log('🏪 Store: Student Current course after setting:', get().currentCourse)
     }
   },
 
