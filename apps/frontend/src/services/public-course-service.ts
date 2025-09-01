@@ -304,6 +304,15 @@ class PublicCourseService {
         error: response.error
       })
       
+      // Check if instructor data is in the response
+      if (response.data) {
+        const apiData = response.data as any
+        console.log('🔍 INSTRUCTOR CHECK - Raw API Response:', apiData)
+        console.log('🔍 INSTRUCTOR CHECK - Has instructor property:', 'instructor' in apiData)
+        console.log('🔍 INSTRUCTOR CHECK - Instructor value:', apiData.instructor)
+        console.log('🔍 INSTRUCTOR CHECK - Instructor type:', typeof apiData.instructor)
+      }
+      
       // Handle API errors
       if (response.error) {
         console.error('❌ API Error in getCourseById:', response.error, 'Status:', response.status)
@@ -344,7 +353,28 @@ class PublicCourseService {
         if (apiResponse.id) {
           console.log('✅ Using real API data for course:', apiResponse.title || apiResponse.id)
           console.log('👨‍🏫 API Instructor data:', apiResponse.instructor)
-          console.log('📝 API Instructor name:', apiResponse.instructor?.name)
+          console.log('📝 API Instructor name:', apiResponse.instructor?.full_name)
+          
+          // Transform the instructor data to match frontend expectations
+          console.log('🔧 TRANSFORMATION: About to transform instructor')
+          console.log('🔧 TRANSFORMATION: Original instructor:', apiResponse.instructor)
+          
+          if (apiResponse.instructor) {
+            console.log('🔧 TRANSFORMATION: Instructor exists, transforming...')
+            const originalInstructor = { ...apiResponse.instructor }
+            
+            apiResponse.instructor = {
+              id: apiResponse.instructor.supabase_user_id || apiResponse.instructor.id,
+              name: apiResponse.instructor.full_name || apiResponse.instructor.display_name || apiResponse.instructor.name,
+              email: apiResponse.instructor.email || '',
+              avatar: apiResponse.instructor.avatar_url || apiResponse.instructor.avatar || ''
+            }
+            console.log('🔧 TRANSFORMATION: Original instructor was:', originalInstructor)
+            console.log('🔧 TRANSFORMATION: Transformed instructor to:', apiResponse.instructor)
+          } else {
+            console.log('🔧 TRANSFORMATION: No instructor to transform')
+          }
+          
           return {
             success: true,
             data: apiResponse

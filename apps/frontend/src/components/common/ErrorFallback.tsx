@@ -12,11 +12,14 @@ import {
   ChevronUp,
   Bug,
   Copy,
-  Check
+  Check,
+  Zap,
+  Sparkles
 } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import type { ErrorFallbackProps } from './ErrorBoundary'
 import type { AppError } from '@/utils/error-handler'
+import { SubscriptionManager } from '@/components/subscription/SubscriptionManager'
 
 export function ErrorFallback({ error, resetError, context }: ErrorFallbackProps | { error: string | null, resetError?: () => void, context?: Record<string, unknown> }) {
   const [showDetails, setShowDetails] = useState(false)
@@ -162,9 +165,83 @@ export function ErrorFallback({ error, resetError, context }: ErrorFallbackProps
         return 'bg-gradient-to-br from-purple-50 to-white border-purple-200'
       case 'server':
         return 'bg-gradient-to-br from-red-50 to-white border-red-200'
+      case 'rate_limit':
+        return 'bg-gradient-to-br from-orange-50 to-white border-orange-200'
       default:
         return 'bg-gradient-to-br from-gray-50 to-white border-gray-200'
     }
+  }
+
+  // Check if this is an AI limit exceeded error
+  const isAILimitError = errorObj.message === 'rate_limit_exceeded' || 
+                        errorObj.message.includes('AI limit') || 
+                        errorObj.message.includes('rate limit') ||
+                        errorObj.type === 'rate_limit'
+
+  // If it's an AI limit error, show subscription plans instead of generic error
+  if (isAILimitError) {
+    return (
+      <div className="min-h-[400px] flex flex-col items-center justify-center p-6 space-y-6">
+        <Card className="w-full max-w-2xl shadow-xl border-2 bg-gradient-to-br from-orange-50 to-white border-orange-200">
+          <CardHeader className="text-center pb-4">
+            <div className="mx-auto mb-4 p-4 rounded-full bg-white shadow-md w-fit">
+              <Zap className="h-12 w-12 text-orange-500" />
+            </div>
+            
+            <CardTitle className="text-2xl font-bold text-gray-800">
+              AI Limit Reached
+            </CardTitle>
+            
+            <CardDescription className="text-base text-gray-600 mt-2">
+              You&apos;ve reached your daily AI interaction limit. Upgrade your plan to continue learning with AI assistance.
+            </CardDescription>
+
+            <div className="flex justify-center gap-2 mt-4">
+              <Badge variant="secondary" className="bg-orange-100 text-orange-700 border-orange-300">
+                AI Limit Exceeded
+              </Badge>
+              <Badge variant="secondary" className="bg-white/80 text-gray-700 border-gray-300">
+                {errorObj.timestamp.toLocaleTimeString()}
+              </Badge>
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-4 pt-2">
+            <Alert className="bg-white/60 border-orange-200">
+              <Sparkles className="h-4 w-4 text-orange-600" />
+              <AlertTitle className="text-gray-800 font-semibold">Continue Learning with Pro Features:</AlertTitle>
+              <AlertDescription>
+                <ul className="list-disc list-inside mt-2 space-y-1 text-gray-600">
+                  <li>Unlimited AI chat interactions</li>
+                  <li>Advanced learning hints and explanations</li>
+                  <li>Personalized learning paths</li>
+                  <li>Priority support</li>
+                </ul>
+              </AlertDescription>
+            </Alert>
+
+            <div className="flex flex-wrap gap-3 justify-center pt-2">
+              {resetError && (
+                <Button onClick={resetError} variant="outline" className="flex items-center gap-2 border-gray-300 hover:bg-gray-50 shadow-sm">
+                  <RefreshCw className="h-4 w-4" />
+                  Try Without AI
+                </Button>
+              )}
+              
+              <Button onClick={handleGoHome} variant="outline" className="flex items-center gap-2 border-gray-300 hover:bg-gray-50 shadow-sm">
+                <Home className="h-4 w-4" />
+                Go Home
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Subscription Plans */}
+        <div className="w-full max-w-6xl">
+          <SubscriptionManager />
+        </div>
+      </div>
+    )
   }
 
   return (
