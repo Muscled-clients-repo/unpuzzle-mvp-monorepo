@@ -1,0 +1,31 @@
+# Base requirements for all environments
+Django==5.0.1
+djangorestframework==3.14.0
+django-environ==0.11.2
+python-dotenv==1.0.0
+dj-database-url==2.1.0
+django-cors-headers==4.3.1
+django-filter==23.5
+psycopg2-binary==2.9.9
+redis==5.0.1
+hiredis==2.3.2  # Redis parser for better performance
+django-redis==5.4.0
+celery==5.3.4
+pillow==10.2.0
+djangorestframework-simplejwt==5.3.0
+channels==4.0.0
+channels-redis==4.1.0
+stripe==11.1.0
+
+# AI Assistant dependencies
+openai>=1.0.0
+tiktoken>=0.5.0
+numpy>=1.24.0
+sentence-transformers>=2.2.0
+scikit-learn>=1.3.0  # For cosine similarity calculations
+
+# Supabase for authentication and database
+supabase>=2.0.0
+
+# AWS S3 and Backblaze B2 support
+boto3>=1.28.0
