@@ -69,8 +69,15 @@ export default function TeachCoursesPage() {
   
   // Action handlers
   const handleArchiveCourse = async (courseId: string) => {
-    if (window.confirm('Are you sure you want to archive this course?')) {
-      await deleteCourse(courseId)
+    if (window.confirm('Are you sure you want to archive this course? This action cannot be undone.')) {
+      try {
+        await deleteCourse(courseId)
+        // The store will handle the success message and UI update
+        console.log('Course archived successfully')
+      } catch (error) {
+        console.error('Failed to archive course:', error)
+        alert('Failed to archive course. Please try again.')
+      }
     }
   }
   

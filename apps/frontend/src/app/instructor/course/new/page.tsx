@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils"
 
 export default function CreateCoursePage() {
   const router = useRouter()
+  const [isCreating, setIsCreating] = useState(false)
   const {
     courseCreation,
     currentStep,
@@ -279,7 +280,6 @@ export default function CreateCoursePage() {
                 setTimeout(() => setSaveMessage(null), 3000)
               }
             }}
-            disabled={isAutoSaving}
           >
             <Save className="mr-2 h-4 w-4" />
             Save Draft
@@ -295,12 +295,6 @@ export default function CreateCoursePage() {
               Auto-save
             </label>
           </div>
-          <Button 
-            onClick={publishCourse}
-            disabled={!courseCreation?.title || (courseCreation?.videos.length || 0) === 0}
-          >
-            Publish Course
-          </Button>
         </div>
       </div>
 
@@ -317,20 +311,20 @@ export default function CreateCoursePage() {
         </button>
         <ChevronRight className="h-4 w-4 text-muted-foreground" />
         <button
-          onClick={() => setCurrentStep('content')}
+          disabled
           className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-lg transition-colors",
-            currentStep === 'content' ? "bg-primary text-primary-foreground" : "bg-muted"
+            "flex items-center gap-2 px-4 py-2 rounded-lg transition-colors cursor-not-allowed opacity-50",
+            "bg-muted text-muted-foreground"
           )}
         >
           <span className="font-medium">2. Content</span>
         </button>
         <ChevronRight className="h-4 w-4 text-muted-foreground" />
         <button
-          onClick={() => setCurrentStep('review')}
+          disabled
           className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-lg transition-colors",
-            currentStep === 'review' ? "bg-primary text-primary-foreground" : "bg-muted"
+            "flex items-center gap-2 px-4 py-2 rounded-lg transition-colors cursor-not-allowed opacity-50",
+            "bg-muted text-muted-foreground"
           )}
         >
           <span className="font-medium">3. Review</span>
@@ -418,9 +412,61 @@ export default function CreateCoursePage() {
             </div>
 
             <div className="flex justify-end">
-              <Button onClick={() => setCurrentStep('content')}>
-                Next: Add Content
-                <ChevronRight className="ml-2 h-4 w-4" />
+              <Button 
+                onClick={async () => {
+                  if (isCreating) return // Prevent double clicks
+                  
+                  try {
+                    setIsCreating(true)
+                    
+                    // Validate required fields
+                    if (!courseCreation?.title?.trim()) {
+                      alert('Please enter a course title before continuing.')
+                      return
+                    }
+                    
+                    // Create the course and wait for completion
+                    await saveDraft()
+                    
+                    // Small delay to ensure state is updated
+                    await new Promise(resolve => setTimeout(resolve, 100))
+                    
+                    // Check if there was an error
+                    const currentState = useAppStore.getState()
+                    if (currentState.saveError) {
+                      alert(`Failed to create course: ${currentState.saveError}`)
+                      return
+                    }
+                    
+                    // Get the course ID from the updated state
+                    const courseId = currentState.courseCreation?.id
+                    
+                    if (courseId) {
+                      // Redirect to course edit page
+                      router.push(`/instructor/course/${courseId}/edit`)
+                    } else {
+                      alert('Failed to create course. No course ID received.')
+                    }
+                  } catch (error) {
+                    console.error('Error creating course:', error)
+                    alert('Failed to create course. Please try again.')
+                  } finally {
+                    setIsCreating(false)
+                  }
+                }}
+                disabled={!courseCreation?.title?.trim() || isCreating}
+              >
+                {isCreating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Creating Course...
+                  </>
+                ) : (
+                  <>
+                    Create Course & Continue
+                    <ChevronRight className="ml-2 h-4 w-4" />
+                  </>
+                )}
               </Button>
             </div>
           </CardContent>

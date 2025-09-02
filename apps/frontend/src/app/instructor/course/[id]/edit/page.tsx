@@ -34,11 +34,13 @@ import {
   Clock,
   FolderOpen,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Send
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MediaLibraryModal } from "./components/MediaLibraryModal"
 import { MediaFile } from "@/services/video-upload-service"
+import { instructorCourseService } from "@/services/instructor-course-service"
 
 // Define types for video data that can come from different sources
 interface VideoData {
@@ -82,6 +84,9 @@ export default function EditCoursePage() {
   const params = useParams()
   const courseId = params.id as string
   
+  const store = useAppStore()
+  
+  // Course creation functions (no parameters)
   const {
     courseCreation,
     setCourseInfo,
@@ -107,7 +112,29 @@ export default function EditCoursePage() {
     mediaLibrary,
     loadChapterMedia,
     chapterMediaState
-  } = useAppStore()
+  } = store
+  
+  // For edit page, we'll use direct API calls instead of store functions
+  // because the store functions expect courses to be in instructorCourses array
+  const publishCourse = async (courseId: string) => {
+    const result = await instructorCourseService.publishCourse(courseId)
+    
+    if (result.data) {
+      // Update the current course status
+      setCourseInfo({ status: 'published' })
+    }
+    return result
+  }
+  
+  const unpublishCourse = async (courseId: string) => {
+    const result = await instructorCourseService.unpublishCourse(courseId)
+    
+    if (result.data) {
+      // Update the current course status
+      setCourseInfo({ status: 'draft' })
+    }
+    return result
+  }
 
   const [activeTab, setActiveTab] = useState("info")
   const [initialLoad, setInitialLoad] = useState(true)
@@ -119,6 +146,8 @@ export default function EditCoursePage() {
   const [assigningMediaId, setAssigningMediaId] = useState<string | null>(null)
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null)
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set())
+  const [isPublishing, setIsPublishing] = useState(false)
+  const [isChangingStatus, setIsChangingStatus] = useState(false)
   
   // Video upload refs and handlers
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -213,6 +242,7 @@ export default function EditCoursePage() {
     loadData()
   }, [courseId, initialLoad, loadCourseForEdit])
 
+
   // Check if we're in edit mode
   const isEditMode = getEditModeStatus()
 
@@ -224,9 +254,74 @@ export default function EditCoursePage() {
     // The success indicator in the header will show the save status
   }
 
+  const handlePublishCourse = async () => {
+    if (!courseCreation?.id) return
+    
+    setIsPublishing(true)
+    try {
+      const result = await publishCourse(courseCreation.id)
+      if (result.error) {
+        // Check if it's a validation error about sections
+        if (result.error.includes('section') || result.error.includes('published section')) {
+          alert('❌ Cannot publish course: You need to create at least one section with content before publishing the course.')
+        } else {
+          alert(`Failed to publish course: ${result.error}`)
+        }
+      } else {
+        alert('✅ Course published successfully!')
+      }
+    } catch (error) {
+      console.error('Failed to publish course:', error)
+      alert('An unexpected error occurred while publishing the course. Please try again.')
+    } finally {
+      setIsPublishing(false)
+    }
+  }
+
   const handleInputChange = (field: string, value: string | number) => {
     // Use existing setCourseInfo - it already handles change tracking
     setCourseInfo({ [field]: value })
+  }
+
+  const handleStatusChange = async (newStatus: string) => {
+    const currentStatus = courseCreation?.status
+    
+    if (isChangingStatus) {
+      return
+    }
+    
+    setIsChangingStatus(true)
+    
+    try {
+      // If status is changing from published to draft, call unpublish API
+      if (currentStatus === 'published' && newStatus === 'draft') {
+        const result = await unpublishCourse(courseCreation.id)
+        if (result.error) {
+          alert(`Failed to unpublish course: ${result.error}`)
+        }
+      }
+      // If status is changing from draft to published, call publish API
+      else if (currentStatus === 'draft' && newStatus === 'published') {
+        const result = await publishCourse(courseCreation.id)
+        if (result.error) {
+          // Check if it's a validation error about sections
+          if (result.error.includes('section') || result.error.includes('published section')) {
+            alert('❌ Cannot publish course: You need to create at least one section with content before publishing the course.')
+          } else {
+            alert(`Failed to publish course: ${result.error}`)
+          }
+        }
+      }
+      // For other status changes (like to under_review), just update locally
+      else {
+        setCourseInfo({ status: newStatus as 'draft' | 'published' | 'under_review' })
+      }
+    } catch (error) {
+      console.error('Failed to change course status:', error)
+      alert('An unexpected error occurred while changing course status. Please try again.')
+    } finally {
+      setIsChangingStatus(false)
+    }
   }
 
   const handleAddChapter = async () => {
@@ -369,10 +464,32 @@ export default function EditCoursePage() {
           <Button
             onClick={handleSave}
             disabled={isAutoSaving}
+            variant="outline"
           >
             <Save className="mr-2 h-4 w-4" />
             {isEditMode ? 'Update Course' : 'Save Draft'}
           </Button>
+          
+          {/* Publish button - only show if course has content */}
+          {courseCreation?.chapters && courseCreation.chapters.some(ch => ch.videos && ch.videos.length > 0) && (
+            <Button
+              onClick={handlePublishCourse}
+              disabled={isPublishing || isAutoSaving || !courseCreation?.title}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {isPublishing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Publishing...
+                </>
+              ) : (
+                <>
+                  <Send className="mr-2 h-4 w-4" />
+                  {courseCreation?.status === 'published' ? 'Update Published' : 'Publish Course'}
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -993,10 +1110,14 @@ export default function EditCoursePage() {
                 <Label htmlFor="status">Course Status</Label>
                 <Select
                   value={courseCreation.status}
-                  onValueChange={(value) => handleInputChange('status', value)}
+                  onValueChange={handleStatusChange}
+                  disabled={isChangingStatus}
                 >
-                  <SelectTrigger id="status">
+                  <SelectTrigger id="status" className={isChangingStatus ? 'opacity-50' : ''}>
                     <SelectValue />
+                    {isChangingStatus && (
+                      <Loader2 className="h-4 w-4 animate-spin ml-2" />
+                    )}
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="draft">Draft</SelectItem>
@@ -1004,6 +1125,59 @@ export default function EditCoursePage() {
                     <SelectItem value="under_review">Under Review</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              
+              {/* Publish Status Card */}
+              <div className="p-4 border rounded-lg">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium">Publication Status</h4>
+                    <p className="text-sm text-muted-foreground">
+                      {courseCreation.status === 'published' 
+                        ? 'Your course is live and visible to students'
+                        : courseCreation.status === 'under_review'
+                        ? 'Your course is being reviewed for publication'
+                        : 'Your course is saved as draft'
+                      }
+                    </p>
+                  </div>
+                  <Badge 
+                    variant={courseCreation.status === 'published' ? 'default' : 'outline'}
+                    className={cn(
+                      courseCreation.status === 'published' && 'bg-green-100 text-green-800',
+                      courseCreation.status === 'under_review' && 'bg-yellow-100 text-yellow-800'
+                    )}
+                  >
+                    {courseCreation.status === 'published' ? 'Published' : 
+                     courseCreation.status === 'under_review' ? 'Under Review' : 'Draft'}
+                  </Badge>
+                </div>
+                
+                {/* Quick Publish Action */}
+                {courseCreation.status !== 'published' && 
+                 courseCreation?.chapters && 
+                 courseCreation.chapters.some(ch => ch.videos && ch.videos.length > 0) && (
+                  <div className="mt-4 pt-4 border-t">
+                    <Button 
+                      onClick={() => publishCourse(courseCreation.id)}
+                      disabled={isPublishing || !courseCreation?.title}
+                      size="sm"
+                      className="w-full"
+                    >
+                      {isPublishing ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Publishing...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="mr-2 h-4 w-4" />
+                          Publish Course
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between p-4 border rounded-lg">

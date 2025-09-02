@@ -829,12 +829,19 @@ def publish_course(request, course_id):
     if not user_profile:
         return Response({'error': 'Authentication required'}, status=401)
     
+    # Check if user has publish permission
+    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_PUBLISH):
+        return Response({
+            'error': 'Permission denied',
+            'message': 'You need instructor permissions to publish courses'
+        }, status=403)
+    
     course = get_object_or_404(Course, id=course_id, instructor=user_profile)
     
-    # Check if course has at least one lesson
-    if not course.sections.filter(is_published=True, lessons__is_published=True).exists():
+    # Check if course has at least one published section with content
+    if not course.sections.filter(is_published=True).exists():
         return Response({
-            'error': 'Course must have at least one lesson to be published',
+            'error': 'Course must have at least one published section to be published',
             'success': False
         }, status=400)
     
@@ -857,10 +864,17 @@ def unpublish_course(request, course_id):
     if not user_profile:
         return Response({'error': 'Authentication required'}, status=401)
     
+    # Check if user has publish permission
+    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_PUBLISH):
+        return Response({
+            'error': 'Permission denied',
+            'message': 'You need instructor permissions to unpublish courses'
+        }, status=403)
+    
     course = get_object_or_404(Course, id=course_id, instructor=user_profile)
     
     course.is_published = False
-    course.status = 'unpublished'
+    course.status = 'draft'  # Changed from 'unpublished' to 'draft' to match frontend expectation
     course.save(update_fields=['is_published', 'status'])
     
     return Response({
