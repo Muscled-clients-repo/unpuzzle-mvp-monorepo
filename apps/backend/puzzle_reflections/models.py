@@ -29,7 +29,9 @@ class PuzzleReflection(AuditableModel, RLSModelMixin):
     # Content association
     video_id = models.ForeignKey(
         'media_library.MediaFile',
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='video_reflections',
         db_index=True,
         help_text="Video MediaFile this reflection is for"
