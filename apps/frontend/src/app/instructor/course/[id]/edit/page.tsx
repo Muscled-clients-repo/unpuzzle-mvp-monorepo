@@ -643,7 +643,7 @@ export default function EditCoursePage() {
                       className="border rounded-lg overflow-hidden"
                     >
                       {/* Chapter Header */}
-                      <div className="p-4 bg-gray-50">
+                      <div className="p-4 ">
                         <div className="flex items-start gap-3">
                           {/* Drag Handle */}
                           <GripVertical className="h-5 w-5 text-muted-foreground mt-2" />
@@ -653,7 +653,7 @@ export default function EditCoursePage() {
                             variant="outline"
                             size="sm"
                             onClick={() => handleToggleChapter(chapter.id)}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-gray-100"
+                            className="flex items-center gap-1 px-3 py-1.5 hover:bg-gray-900"
                           >
                             {isExpanded ? (
                               <ChevronDown className="h-4 w-4" />
@@ -743,7 +743,7 @@ export default function EditCoursePage() {
                       
                       {/* Collapsible section for videos */}
                       {isExpanded && (
-                        <div className="p-4 bg-white border-t">
+                        <div className="p-4 border-t">
                           {isLoading ? (
                             <div className="flex items-center justify-center py-4">
                               <Loader2 className="h-6 w-6 animate-spin mr-2" />
@@ -787,7 +787,7 @@ export default function EditCoursePage() {
                                               video?.mediaFile?.id;
                                 
                                 return (
-                                  <div key={videoId || `video-${videoIndex}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                                  <div key={videoId || `video-${videoIndex}`} className="flex items-center justify-between p-3  rounded-lg hover:bg-gray-900 transition-colors">
                                     <div className="flex items-center gap-3">
                                       <span className="text-sm font-medium text-gray-500">{videoIndex + 1}.</span>
                                       <FileVideo className="h-4 w-4 text-blue-500" />
