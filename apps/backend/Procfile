@@ -1,4 +1,0 @@
-web: gunicorn app.wsgi:application --bind 0.0.0.0:$PORT --workers 3 --threads 2 --timeout 120 --log-file -
-worker: celery -A app worker --loglevel=info --concurrency=2
-beat: celery -A app beat --loglevel=info
-channels: daphne -b 0.0.0.0 -p $PORT app.asgi:application
