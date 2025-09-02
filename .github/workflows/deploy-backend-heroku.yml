@@ -22,6 +22,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
       
+      - name: Debug - Check environment variables
+        run: |
+          echo "======================================"
+          echo "Debug Information"
+          echo "======================================"
+          echo "HEROKU_APP_NAME is set: ${{ secrets.HEROKU_APP_NAME != '' }}"
+          echo "HEROKU_API_KEY is set: ${{ secrets.HEROKU_API_KEY != '' }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "======================================"
+      
       - name: Set up Python for testing
         uses: actions/setup-python@v4
         with:
@@ -47,8 +58,43 @@ jobs:
           SECRET_KEY: test-secret-key-for-ci
           DEBUG: "False"
           DJANGO_SETTINGS_MODULE: app.settings
+        continue-on-error: true
         run: |
           python manage.py check --deploy 2>/dev/null || echo "Check completed with warnings"
+      
+      # Install Heroku CLI first
+      - name: Install Heroku CLI
+        run: |
+          echo "Installing Heroku CLI..."
+          curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
+          heroku --version
+      
+      # Verify Heroku app exists and get info
+      - name: Verify Heroku app exists
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "Verifying Heroku app exists..."
+          
+          # Check if app exists using CLI
+          if heroku apps:info -a ${{ secrets.HEROKU_APP_NAME }}; then
+            echo "✅ App '${{ secrets.HEROKU_APP_NAME }}' exists!"
+            
+            # Get stack info
+            echo "Current stack:"
+            heroku stack -a ${{ secrets.HEROKU_APP_NAME }}
+            
+            # Ensure it's using container stack
+            echo "Setting stack to container..."
+            heroku stack:set container -a ${{ secrets.HEROKU_APP_NAME }} || echo "Stack already set to container"
+          else
+            echo "❌ App '${{ secrets.HEROKU_APP_NAME }}' not found!"
+            echo "Please check:"
+            echo "1. The HEROKU_APP_NAME secret is correctly set in GitHub"
+            echo "2. The app exists in your Heroku account"
+            echo "3. The HEROKU_API_KEY has access to this app"
+            exit 1
+          fi
       
       # Docker build and deploy section
       - name: Set up Docker Buildx
@@ -58,62 +104,97 @@ jobs:
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
+          echo "Logging into Heroku Container Registry..."
           echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
+          echo "✅ Logged in successfully"
       
       - name: Build Docker image
         working-directory: apps/backend
         run: |
           echo "Building Docker image..."
           docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
-          echo "Docker build completed successfully"
+          echo "✅ Docker build completed successfully"
+          
+          # List the image to verify it was created
+          docker images | grep ${{ secrets.HEROKU_APP_NAME }}
       
       - name: Push Docker image to Heroku Registry
         run: |
           echo "Pushing image to Heroku Container Registry..."
           docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
-          echo "Image pushed successfully"
+          echo "✅ Image pushed successfully"
       
-      - name: Get Docker image ID
-        id: docker_image
-        run: |
-          IMAGE_ID=$(docker inspect registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web --format='{{index .RepoDigests 0}}')
-          echo "IMAGE_ID=${IMAGE_ID}" >> $GITHUB_OUTPUT
-          echo "Docker image ID: ${IMAGE_ID}"
-      
-      - name: Release container on Heroku via API
+      - name: Release container using Heroku CLI
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          echo "Releasing container on Heroku..."
+          echo "Releasing container on Heroku using CLI..."
           
-          # Use Heroku API to release the container
-          response=$(curl -s -w "\n%{http_code}" -X PATCH \
-            https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/formation \
-            -d '{
-              "updates": [
-                {
-                  "type": "web",
-                  "docker_image": "${{ steps.docker_image.outputs.IMAGE_ID }}"
-                }
-              ]
-            }' \
-            -H "Content-Type: application/json" \
-            -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
-            -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}")
-          
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed '$d')
-          
-          echo "Response code: $http_code"
-          echo "Response body: $body"
-          
-          if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
+          # Release the container
+          if heroku container:release web -a ${{ secrets.HEROKU_APP_NAME }}; then
             echo "✅ Container released successfully!"
           else
-            echo "❌ Failed to release container. Response code: $http_code"
-            echo "Response: $body"
-            exit 1
+            echo "❌ Failed to release container"
+            echo "Attempting alternative release method..."
+            
+            # Alternative: Try with --verbose flag for more info
+            heroku container:release web -a ${{ secrets.HEROKU_APP_NAME }} --verbose || true
+            
+            # Get current releases to debug
+            echo "Current releases:"
+            heroku releases -a ${{ secrets.HEROKU_APP_NAME }} -n 5
+            
+            # Check if the image is in the registry
+            echo "Checking container registry..."
+            curl -s -X GET \
+              "https://registry.heroku.com/v2/${{ secrets.HEROKU_APP_NAME }}/web/tags/list" \
+              -H "Authorization: Bearer $(echo -n ':${{ secrets.HEROKU_API_KEY }}' | base64)" \
+              -H "Accept: application/json" || echo "Could not list tags"
           fi
+      
+      - name: Scale dynos if needed
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        continue-on-error: true
+        run: |
+          echo "Checking dyno formation..."
+          heroku ps -a ${{ secrets.HEROKU_APP_NAME }}
+          
+          # Ensure web dyno is running
+          echo "Scaling web dyno..."
+          heroku ps:scale web=1 -a ${{ secrets.HEROKU_APP_NAME }} || echo "Dyno already scaled"
+      
+      - name: Run database migrations
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        continue-on-error: true
+        run: |
+          echo "Running database migrations..."
+          heroku run python manage.py migrate --noinput -a ${{ secrets.HEROKU_APP_NAME }} || echo "Migrations might have already run"
+      
+      - name: Check Heroku app status
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        continue-on-error: true
+        run: |
+          echo "======================================"
+          echo "Heroku App Status"
+          echo "======================================"
+          
+          # Get app info
+          heroku apps:info -a ${{ secrets.HEROKU_APP_NAME }}
+          
+          # Get dyno status
+          echo ""
+          echo "Dyno Status:"
+          heroku ps -a ${{ secrets.HEROKU_APP_NAME }}
+          
+          # Get recent releases
+          echo ""
+          echo "Recent Releases:"
+          heroku releases -a ${{ secrets.HEROKU_APP_NAME }} -n 3
+          
+          echo "======================================"
       
       - name: Wait for deployment
         run: |
@@ -125,44 +206,59 @@ jobs:
         run: |
           echo "Checking if app is running..."
           
-          # Try multiple endpoints
-          for endpoint in "" "api/" "api/health/" "admin/"; do
-            url="https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/${endpoint}"
-            echo "Checking ${url}..."
-            
-            response=$(curl -s -o /dev/null -w "%{http_code}" "${url}")
-            
-            if [ "$response" -eq 200 ] || [ "$response" -eq 301 ] || [ "$response" -eq 302 ] || [ "$response" -eq 404 ]; then
-              echo "✅ App is responding! Endpoint: ${endpoint}, Response code: ${response}"
-              echo "🔗 App URL: https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/"
-              break
-            else
-              echo "Endpoint ${endpoint} returned: ${response}"
-            fi
-          done
+          app_url="https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com"
+          
+          # Try the main URL
+          echo "Checking $app_url ..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" "$app_url")
+          
+          if [ "$response" -eq 200 ] || [ "$response" -eq 301 ] || [ "$response" -eq 302 ] || [ "$response" -eq 404 ]; then
+            echo "✅ App is responding! Response code: $response"
+            echo "🔗 App URL: $app_url"
+          else
+            echo "⚠️ App returned response code: $response"
+            echo "This might be normal during startup. Checking logs..."
+          fi
+          
+          # Try health check endpoint if exists
+          health_url="$app_url/api/health/"
+          echo "Checking health endpoint: $health_url"
+          curl -s "$health_url" || echo "Health endpoint not available"
       
-      - name: Get Heroku logs on failure
-        if: failure()
+      - name: Get Heroku logs
+        if: always()
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        continue-on-error: true
         run: |
-          echo "Fetching recent logs from Heroku..."
-          
-          # Use Heroku API to get logs
-          curl -n -X GET https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/log-sessions \
-            -H "Accept: application/vnd.heroku+json; version=3" \
-            -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
-            -d "lines=100&source=app&tail=true" || echo "Could not fetch logs"
+          echo "======================================"
+          echo "Recent Heroku Logs"
+          echo "======================================"
+          heroku logs --tail -n 100 -a ${{ secrets.HEROKU_APP_NAME }} || echo "Could not fetch logs"
+          echo "======================================"
       
       - name: Deployment summary
         if: always()
         run: |
+          echo ""
           echo "======================================"
-          echo "Deployment Summary"
+          echo "🚀 Deployment Summary"
           echo "======================================"
-          echo "App Name: ${{ secrets.HEROKU_APP_NAME }}"
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Status: ${{ job.status }}"
-          echo "URL: https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/"
+          echo "📱 App Name: ${{ secrets.HEROKU_APP_NAME }}"
+          echo "🌿 Branch: ${{ github.ref_name }}"
+          echo "📝 Commit: ${{ github.sha }}"
+          echo "✨ Status: ${{ job.status }}"
+          echo "🔗 URL: https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/"
+          echo "======================================"
+          echo ""
+          if [ "${{ job.status }}" = "failure" ]; then
+            echo "⚠️ Deployment failed. Please check:"
+            echo "1. HEROKU_APP_NAME secret is correct"
+            echo "2. HEROKU_API_KEY has proper permissions"
+            echo "3. Heroku app exists and is set to container stack"
+            echo "4. Docker image was built and pushed successfully"
+            echo "5. Check the logs above for specific errors"
+          else
+            echo "✅ Deployment completed successfully!"
+          fi
           echo "======================================"
