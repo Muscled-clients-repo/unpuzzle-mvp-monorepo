@@ -225,17 +225,6 @@ jobs:
           echo "Checking health endpoint: $health_url"
           curl -s "$health_url" || echo "Health endpoint not available"
       
-      - name: Get Heroku logs
-        if: always()
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        continue-on-error: true
-        run: |
-          echo "======================================"
-          echo "Recent Heroku Logs"
-          echo "======================================"
-          heroku logs --tail -n 100 -a ${{ secrets.HEROKU_APP_NAME }} || echo "Could not fetch logs"
-          echo "======================================"
       
       - name: Deployment summary
         if: always()
