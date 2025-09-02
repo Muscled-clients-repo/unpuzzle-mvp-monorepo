@@ -1,0 +1,207 @@
+name: Deploy Backend to Heroku
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - nh-dev  # Add your development branch
+    paths:
+      - 'apps/backend/**'
+      - '.github/workflows/deploy-backend-heroku.yml'
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
+  HEROKU_EMAIL: ${{ secrets.HEROKU_EMAIL }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('apps/backend/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        working-directory: apps/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Run tests
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          SECRET_KEY: test-secret-key-for-ci
+          DEBUG: "False"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          python manage.py check
+          python manage.py test --keepdb
+      
+      - name: Run linting
+        working-directory: apps/backend
+        run: |
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Heroku CLI
+        run: |
+          curl https://cli-assets.heroku.com/install.sh | sh
+      
+      - name: Login to Heroku
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "machine api.heroku.com" > ~/.netrc
+          echo "  login ${{ secrets.HEROKU_EMAIL }}" >> ~/.netrc
+          echo "  password ${{ secrets.HEROKU_API_KEY }}" >> ~/.netrc
+          echo "machine git.heroku.com" >> ~/.netrc
+          echo "  login ${{ secrets.HEROKU_EMAIL }}" >> ~/.netrc
+          echo "  password ${{ secrets.HEROKU_API_KEY }}" >> ~/.netrc
+          chmod 600 ~/.netrc
+      
+      - name: Add Heroku remote
+        run: |
+          heroku git:remote -a ${{ secrets.HEROKU_APP_NAME }}
+      
+      - name: Set Heroku config vars
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku config:set \
+            SECRET_KEY="${{ secrets.DJANGO_SECRET_KEY }}" \
+            DEBUG="False" \
+            ALLOWED_HOSTS="${{ secrets.HEROKU_APP_NAME }}.herokuapp.com" \
+            DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+            SUPABASE_ANON_KEY="${{ secrets.SUPABASE_ANON_KEY }}" \
+            SUPABASE_SERVICE_KEY="${{ secrets.SUPABASE_SERVICE_KEY }}" \
+            SUPABASE_JWT_SECRET="${{ secrets.SUPABASE_JWT_SECRET }}" \
+            STRIPE_SECRET_KEY="${{ secrets.STRIPE_SECRET_KEY }}" \
+            STRIPE_PUBLISHABLE_KEY="${{ secrets.STRIPE_PUBLISHABLE_KEY }}" \
+            STRIPE_WEBHOOK_SECRET="${{ secrets.STRIPE_WEBHOOK_SECRET }}" \
+            OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            BACKBLAZE_KEY_ID="${{ secrets.BACKBLAZE_KEY_ID }}" \
+            BACKBLAZE_APPLICATION_KEY="${{ secrets.BACKBLAZE_APPLICATION_KEY }}" \
+            BACKBLAZE_BUCKET_ID="${{ secrets.BACKBLAZE_BUCKET_ID }}" \
+            BACKBLAZE_BUCKET_NAME="${{ secrets.BACKBLAZE_BUCKET_NAME }}" \
+            REDIS_URL="${{ secrets.REDIS_URL }}" \
+            CLOUDFLARE_ACCOUNT_ID="${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" \
+            CLOUDFLARE_API_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            DISABLE_COLLECTSTATIC="1" \
+            -a ${{ secrets.HEROKU_APP_NAME }}
+      
+      - name: Deploy to Heroku
+        run: |
+          # Create a subtree push for the backend directory
+          git subtree push --prefix apps/backend heroku main --force
+      
+      - name: Run database migrations
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku run python manage.py migrate --noinput -a ${{ secrets.HEROKU_APP_NAME }}
+      
+      - name: Collect static files
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku run python manage.py collectstatic --noinput -a ${{ secrets.HEROKU_APP_NAME }}
+      
+      - name: Check deployment
+        run: |
+          sleep 10
+          curl -f https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/api/health/ || exit 1
+      
+      - name: Notify deployment status
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const status = '${{ job.status }}';
+            const emoji = status === 'success' ? '✅' : '❌';
+            const message = `${emoji} Backend deployment to Heroku: ${status}`;
+            
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: message
+            });
+
+  deploy-staging:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/nh-dev' || github.ref == 'refs/heads/develop'
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Heroku CLI
+        run: |
+          curl https://cli-assets.heroku.com/install.sh | sh
+      
+      - name: Login to Heroku
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "machine api.heroku.com" > ~/.netrc
+          echo "  login ${{ secrets.HEROKU_EMAIL }}" >> ~/.netrc
+          echo "  password ${{ secrets.HEROKU_API_KEY }}" >> ~/.netrc
+          echo "machine git.heroku.com" >> ~/.netrc
+          echo "  login ${{ secrets.HEROKU_EMAIL }}" >> ~/.netrc
+          echo "  password ${{ secrets.HEROKU_API_KEY }}" >> ~/.netrc
+          chmod 600 ~/.netrc
+      
+      - name: Add Heroku remote (Staging)
+        run: |
+          heroku git:remote -a ${{ secrets.HEROKU_STAGING_APP_NAME }}
+      
+      - name: Deploy to Heroku Staging
+        run: |
+          git subtree push --prefix apps/backend heroku ${{ github.ref_name }}:main --force
+      
+      - name: Run database migrations (Staging)
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          heroku run python manage.py migrate --noinput -a ${{ secrets.HEROKU_STAGING_APP_NAME }}

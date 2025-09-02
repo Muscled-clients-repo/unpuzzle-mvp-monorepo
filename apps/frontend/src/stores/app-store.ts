@@ -15,6 +15,7 @@ import { InstructorVideoSlice, createInstructorVideoSlice } from './slices/instr
 import { PublicCourseSlice, createPublicCourseSlice } from './slices/public-course-slice'
 import { PaymentSlice, createPaymentSlice } from './slices/payment-slice'
 import { SubscriptionSlice, createSubscriptionSlice } from './slices/subscription-slice'
+import { WebSocketSlice, createWebSocketSlice } from './slices/websocket-slice'
 import { isDevelopment } from '@/config/env'
 
 // Clean architecture with role-specific stores
@@ -32,7 +33,8 @@ export interface AppStore extends
   InstructorVideoSlice,  // NEW - role-specific
   PublicCourseSlice,     // NEW - public course browsing
   PaymentSlice,          // NEW - payment and enrollment
-  SubscriptionSlice      // NEW - subscription management
+  SubscriptionSlice,     // NEW - subscription management
+  WebSocketSlice         // NEW - WebSocket real-time events
 {}
 
 export const useAppStore = create<AppStore>()(
@@ -54,6 +56,7 @@ export const useAppStore = create<AppStore>()(
         ...createPublicCourseSlice(...args),
         ...createPaymentSlice(...args),
         ...createSubscriptionSlice(...args),
+        ...createWebSocketSlice(...args),
       })
     ),
     {
