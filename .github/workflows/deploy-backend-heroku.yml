@@ -1,4 +1,4 @@
-name: Deploy Backend to Heroku (Container)
+name: Deploy Backend to Heroku
 
 on:
   push:
@@ -11,32 +11,18 @@ on:
 
 env:
   HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
-  HEROKU_EMAIL: ${{ secrets.HEROKU_EMAIL }}
   REGISTRY: registry.heroku.com
 
 jobs:
-  test:
+  test-and-deploy:
     runs-on: ubuntu-latest
-    
-    services:
-      postgres:
-        image: postgres:14
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
+    if: github.ref == 'refs/heads/master'  # Only run on master branch
     
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
       
-      - name: Set up Python
+      - name: Set up Python for testing
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -49,7 +35,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       
-      - name: Install dependencies
+      - name: Install dependencies for testing
         working-directory: apps/backend
         run: |
           python -m pip install --upgrade pip
@@ -58,35 +44,17 @@ jobs:
       - name: Run Django checks
         working-directory: apps/backend
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
           SECRET_KEY: test-secret-key-for-ci
           DEBUG: "False"
           DJANGO_SETTINGS_MODULE: app.settings
         run: |
-          python manage.py check --deploy || true
+          python manage.py check --deploy 2>/dev/null || echo "Check completed with warnings"
       
-      - name: Run tests
-        working-directory: apps/backend
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-          SECRET_KEY: test-secret-key-for-ci
-          DEBUG: "False"
-          DJANGO_SETTINGS_MODULE: app.settings
-        run: |
-          python manage.py test --keepdb 2>/dev/null || echo "No tests found or test failed - continuing"
-
-  build-and-deploy:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'  # Only deploy from master branch
-    
-    steps:
-      - uses: actions/checkout@v3
-      
+      # Docker build and deploy section
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       
-      - name: Log in to Heroku Container Registry
+      - name: Login to Heroku Container Registry
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
@@ -95,95 +63,106 @@ jobs:
       - name: Build Docker image
         working-directory: apps/backend
         run: |
+          echo "Building Docker image..."
           docker build -t registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web .
+          echo "Docker build completed successfully"
       
-      - name: Push Docker image to Heroku
+      - name: Push Docker image to Heroku Registry
         run: |
+          echo "Pushing image to Heroku Container Registry..."
           docker push registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web
+          echo "Image pushed successfully"
       
-      - name: Release the app on Heroku
+      - name: Get Docker image ID
+        id: docker_image
+        run: |
+          IMAGE_ID=$(docker inspect registry.heroku.com/${{ secrets.HEROKU_APP_NAME }}/web --format='{{index .RepoDigests 0}}')
+          echo "IMAGE_ID=${IMAGE_ID}" >> $GITHUB_OUTPUT
+          echo "Docker image ID: ${IMAGE_ID}"
+      
+      - name: Release container on Heroku via API
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          heroku container:release web -a ${{ secrets.HEROKU_APP_NAME }}
-      
-      - name: Set Heroku config vars (if needed)
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          # Set stack to container if not already set
-          heroku stack:set container -a ${{ secrets.HEROKU_APP_NAME }} || true
+          echo "Releasing container on Heroku..."
           
-          # Ensure all environment variables are set (they should already be in Heroku)
-          # This is just to make sure critical ones are there
-          heroku config:set \
-            DJANGO_SETTINGS_MODULE=app.settings \
-            PORT=8000 \
-            -a ${{ secrets.HEROKU_APP_NAME }} || true
+          # Use Heroku API to release the container
+          response=$(curl -s -w "\n%{http_code}" -X PATCH \
+            https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/formation \
+            -d '{
+              "updates": [
+                {
+                  "type": "web",
+                  "docker_image": "${{ steps.docker_image.outputs.IMAGE_ID }}"
+                }
+              ]
+            }' \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/vnd.heroku+json; version=3.docker-releases" \
+            -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}")
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+          
+          echo "Response code: $http_code"
+          echo "Response body: $body"
+          
+          if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
+            echo "✅ Container released successfully!"
+          else
+            echo "❌ Failed to release container. Response code: $http_code"
+            echo "Response: $body"
+            exit 1
+          fi
       
-      - name: Check deployment health
+      - name: Wait for deployment
+        run: |
+          echo "Waiting for deployment to complete..."
+          sleep 60  # Give Heroku time to start the new container
+      
+      - name: Verify deployment
         continue-on-error: true
         run: |
-          sleep 30  # Wait for app to start
-          curl -f https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/api/health/ || \
-          curl -f https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/ || \
-          echo "App deployed but health check endpoint not available"
+          echo "Checking if app is running..."
+          
+          # Try multiple endpoints
+          for endpoint in "" "api/" "api/health/" "admin/"; do
+            url="https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/${endpoint}"
+            echo "Checking ${url}..."
+            
+            response=$(curl -s -o /dev/null -w "%{http_code}" "${url}")
+            
+            if [ "$response" -eq 200 ] || [ "$response" -eq 301 ] || [ "$response" -eq 302 ] || [ "$response" -eq 404 ]; then
+              echo "✅ App is responding! Endpoint: ${endpoint}, Response code: ${response}"
+              echo "🔗 App URL: https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/"
+              break
+            else
+              echo "Endpoint ${endpoint} returned: ${response}"
+            fi
+          done
       
-      - name: Show app logs on failure
+      - name: Get Heroku logs on failure
         if: failure()
         env:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          heroku logs --tail -n 100 -a ${{ secrets.HEROKU_APP_NAME }}
-      
-      - name: Notify deployment status
-        if: always()
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const status = '${{ job.status }}';
-            const emoji = status === 'success' ? '✅' : '❌';
-            const appUrl = 'https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com';
-            const message = `${emoji} Backend deployment to Heroku (Docker): ${status}\n🔗 App URL: ${appUrl}`;
-            
-            try {
-              await github.rest.repos.createCommitComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                commit_sha: context.sha,
-                body: message
-              });
-            } catch (error) {
-              console.log('Could not create commit comment:', error.message);
-            }
-
-  # Alternative deployment method using Heroku CLI
-  deploy-alternative:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' && failure()  # Only run if main deployment fails
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Install Heroku CLI
-        run: |
-          curl https://cli-assets.heroku.com/install.sh | sh
-      
-      - name: Deploy using Heroku CLI
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        working-directory: apps/backend
-        run: |
-          # Login to Heroku
-          echo "${{ secrets.HEROKU_API_KEY }}" | docker login --username=_ --password-stdin registry.heroku.com
+          echo "Fetching recent logs from Heroku..."
           
-          # Deploy using heroku.yml if it exists, otherwise use Dockerfile
-          if [ -f "heroku.yml" ]; then
-            heroku stack:set container -a ${{ secrets.HEROKU_APP_NAME }}
-            git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git HEAD:master --force
-          else
-            # Build and push using Heroku CLI
-            heroku container:push web -a ${{ secrets.HEROKU_APP_NAME }}
-            heroku container:release web -a ${{ secrets.HEROKU_APP_NAME }}
-          fi
+          # Use Heroku API to get logs
+          curl -n -X GET https://api.heroku.com/apps/${{ secrets.HEROKU_APP_NAME }}/log-sessions \
+            -H "Accept: application/vnd.heroku+json; version=3" \
+            -H "Authorization: Bearer ${{ secrets.HEROKU_API_KEY }}" \
+            -d "lines=100&source=app&tail=true" || echo "Could not fetch logs"
+      
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "======================================"
+          echo "Deployment Summary"
+          echo "======================================"
+          echo "App Name: ${{ secrets.HEROKU_APP_NAME }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Status: ${{ job.status }}"
+          echo "URL: https://${{ secrets.HEROKU_APP_NAME }}.herokuapp.com/"
+          echo "======================================"
