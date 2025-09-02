@@ -759,7 +759,7 @@ export default function EditCoursePage() {
                         {/* Display videos in this chapter */}
                         {chapter.videos && chapter.videos.length > 0 && (
                           <div className="mt-4 space-y-2">
-                            <h5 className="text-sm font-medium text-gray-700">Videos in this chapter:</h5>
+                            <h5 className="text-sm font-medium text-gray-50">Videos in this chapter:</h5>
                             <div className="space-y-2">
                               {chapter.videos?.map((video: VideoData, videoIndex: number) => {
                                 // Skip if video is null or undefined
@@ -789,12 +789,12 @@ export default function EditCoursePage() {
                                 return (
                                   <div key={videoId || `video-${videoIndex}`} className="flex items-center justify-between p-3  rounded-lg hover:bg-gray-900 transition-colors">
                                     <div className="flex items-center gap-3">
-                                      <span className="text-sm font-medium text-gray-500">{videoIndex + 1}.</span>
-                                      <FileVideo className="h-4 w-4 text-blue-500" />
+                                      <span className="text-sm font-medium text-gray-50">{videoIndex + 1}.</span>
+                                      <FileVideo className="h-4 w-4 text-gray-50" />
                                       <div className="flex flex-col">
-                                        <span className="text-sm font-medium text-gray-900">{videoTitle}</span>
+                                        <span className="text-sm font-medium text-gray-50">{videoTitle}</span>
                                         {videoDuration && (
-                                          <span className="text-xs text-gray-500">Duration: {videoDuration}</span>
+                                          <span className="text-xs text-gray-50">Duration: {videoDuration}</span>
                                         )}
                                       </div>
                                     </div>
