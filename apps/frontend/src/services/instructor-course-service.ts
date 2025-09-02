@@ -90,18 +90,22 @@ export class InstructorCourseService {
     }
 
     console.log('🚀 Making API call to: /api/v1/instructor/courses')
-    const response = await apiClient.get<Course[]>(`/api/v1/instructor/courses`)
+    const response = await apiClient.get<any>(`/api/v1/instructor/courses`)
     console.log('📡 API response:', response)
     
+    // Backend returns { success: true, data: coursesArray }
+    // Extract the actual courses array
+    const coursesData = response.data?.data || response.data
+    
     // Cache successful response
-    if (!response.error && response.data) {
+    if (!response.error && coursesData) {
       console.log('💾 Caching response data')
-      this.cache.set(cacheKey, { data: response.data, timestamp: Date.now() })
+      this.cache.set(cacheKey, { data: coursesData, timestamp: Date.now() })
     }
     
     return response.error
       ? { error: response.error }
-      : { data: response.data }
+      : { data: coursesData }
   }
 
   async getCourseAnalytics(courseId: string): Promise<ServiceResult<{
@@ -199,10 +203,15 @@ export class InstructorCourseService {
       return { data: newCourse }
     }
 
-    const response = await apiClient.post<Course>('/api/v1/instructor/courses', course)
-    return response.error
-      ? { error: response.error }
-      : { data: response.data }
+    const response = await apiClient.post<any>('/api/v1/instructor/courses', course)
+    if (response.error) {
+      return { error: response.error }
+    }
+    
+    // Backend returns { success: true, data: courseData }
+    // Extract the actual course data
+    const courseData = response.data?.data || response.data
+    return { data: courseData }
   }
 
   async updateCourse(
@@ -222,13 +231,18 @@ export class InstructorCourseService {
       }
     }
 
-    const response = await apiClient.put<Course>(
+    const response = await apiClient.put<any>(
       `/api/v1/instructor/courses/${courseId}`,
       updates
     )
-    return response.error
-      ? { error: response.error }
-      : { data: response.data }
+    if (response.error) {
+      return { error: response.error }
+    }
+    
+    // Backend returns { success: true, data: courseData }
+    // Extract the actual course data
+    const courseData = response.data?.data || response.data
+    return { data: courseData }
   }
 
   async deleteCourse(courseId: string): Promise<ServiceResult<{ success: boolean }>> {
@@ -236,7 +250,7 @@ export class InstructorCourseService {
       return { data: { success: true } }
     }
 
-    const response = await apiClient.delete(`/api/v1/instructor/courses/${courseId}`)
+    const response = await apiClient.delete(`/api/v1/instructor/courses/${courseId}/delete/`)
     
     // Clear cache on deletion
     if (!response.error) {
@@ -283,7 +297,7 @@ export class InstructorCourseService {
       }
     }
 
-    const response = await apiClient.post(
+    const response = await apiClient.post<any>(
       `/api/v1/instructor/courses/${courseId}/publish`
     )
     
@@ -292,30 +306,59 @@ export class InstructorCourseService {
       this.clearCoursesCache()
     }
     
-    return response.error
-      ? { error: response.error }
-      : { data: response.data || { success: true } }
+    if (response.error) {
+      // Try to parse the error message if it's JSON
+      try {
+        const errorData = JSON.parse(response.error)
+        // Backend sends { error: "message" } format
+        return { error: errorData.error || response.error }
+      } catch {
+        // If not JSON, use as is
+        return { error: response.error }
+      }
+    }
+    
+    return { data: response.data || { success: true } }
   }
 
   async unpublishCourse(courseId: string): Promise<ServiceResult<{ success: boolean }>> {
+    console.log('📡 InstructorCourseService.unpublishCourse called with courseId:', courseId)
+    
     if (useMockData) {
+      console.log('🎭 Using mock data for unpublish')
       return {
         data: { success: true }
       }
     }
 
+    console.log('🌐 Calling API: POST /api/v1/instructor/courses/' + courseId + '/unpublish')
     const response = await apiClient.post(
       `/api/v1/instructor/courses/${courseId}/unpublish`
     )
     
+    console.log('📡 Unpublish API response:', response)
+    
     // Clear cache on unpublish
     if (!response.error) {
+      console.log('🧹 Clearing courses cache')
       this.clearCoursesCache()
     }
     
-    return response.error
-      ? { error: response.error }
-      : { data: response.data || { success: true } }
+    if (response.error) {
+      // Try to parse the error message if it's JSON
+      try {
+        const errorData = JSON.parse(response.error)
+        // Backend sends { error: "message" } format
+        return { error: errorData.error || response.error }
+      } catch {
+        // If not JSON, use as is
+        return { error: response.error }
+      }
+    }
+    
+    const result = { data: (response.data as { success: boolean }) || { success: true } }
+    console.log('📡 Returning from unpublishCourse:', result)
+    return result
   }
 
   async addVideoToCourse(

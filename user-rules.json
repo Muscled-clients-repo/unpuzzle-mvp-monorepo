@@ -1,0 +1,277 @@
+{
+  "roles": {
+    "student": {
+      "name": "Student",
+      "description": "Students can enroll in courses, watch videos, interact with AI assistants, submit reflections, and track progress",
+      "permissions": [
+        "course:read",
+        "course:list",
+        "enrollment:create",
+        "enrollment:read",
+        "media:read"
+      ],
+      "restrictions": {
+        "course_creation": false,
+        "student_data_access": false,
+        "instructor_tools": false,
+        "system_administration": false,
+        "bulk_operations": false
+      },
+      "features": {
+        "ai_chat": true,
+        "video_reflections": true,
+        "progress_tracking": true,
+        "quiz_attempts": true,
+        "course_enrollment": true,
+        "personal_analytics": true,
+        "notification_center": true,
+        "subscription_management": true
+      }
+    },
+    "instructor": {
+      "name": "Instructor",
+      "description": "Instructors can create and manage courses, upload videos, view student analytics, respond to student reflections, and manage course content",
+      "permissions": [
+        "user:read",
+        "course:create",
+        "course:read",
+        "course:update",
+        "course:list",
+        "course:publish",
+        "enrollment:read",
+        "enrollment:list",
+        "media:upload",
+        "media:read",
+        "media:update",
+        "media:list",
+        "analytics:view"
+      ],
+      "restrictions": {
+        "user_management": false,
+        "system_administration": false,
+        "other_instructor_content": false,
+        "bulk_student_operations": false,
+        "platform_settings": false
+      },
+      "features": {
+        "course_creation": true,
+        "video_management": true,
+        "student_analytics": true,
+        "reflection_responses": true,
+        "quiz_creation": true,
+        "earnings_tracking": true,
+        "student_communication": true,
+        "content_library": true,
+        "course_publishing": true,
+        "engagement_metrics": true
+      }
+    }
+  },
+  "permission_categories": {
+    "authentication": {
+      "name": "Authentication & Profile",
+      "description": "User authentication, profile management, and account settings"
+    },
+    "courses": {
+      "name": "Course Management",
+      "description": "Course creation, viewing, updating, and publishing"
+    },
+    "videos": {
+      "name": "Video Management",
+      "description": "Video upload, playback, transcripts, and progress tracking"
+    },
+    "enrollment": {
+      "name": "Enrollment Management",
+      "description": "Course enrollment, access control, and student management"
+    },
+    "ai_assistant": {
+      "name": "AI Assistant",
+      "description": "AI chat, hints, quiz generation, and intelligent features"
+    },
+    "reflections": {
+      "name": "Student Reflections",
+      "description": "Voice, image, and video reflections on course content"
+    },
+    "quizzes": {
+      "name": "Quiz System",
+      "description": "Quiz creation, attempts, scoring, and analytics"
+    },
+    "progress": {
+      "name": "Progress Tracking",
+      "description": "Learning progress, completion status, and milestones"
+    },
+    "media": {
+      "name": "Media Library",
+      "description": "File uploads, media storage, and content organization"
+    },
+    "analytics": {
+      "name": "Analytics & Insights",
+      "description": "Performance metrics, engagement data, and reporting"
+    },
+    "notifications": {
+      "name": "Notifications",
+      "description": "System notifications, alerts, and communications"
+    },
+    "payments": {
+      "name": "Payment System",
+      "description": "Transactions, subscriptions, and revenue tracking"
+    },
+    "students": {
+      "name": "Student Management",
+      "description": "Student data, activities, and instructor-student interactions"
+    },
+    "lessons": {
+      "name": "Lesson Management",
+      "description": "Standalone lesson creation and management"
+    }
+  },
+  "feature_matrix": {
+    "learning_features": {
+      "video_watching": ["student", "instructor"],
+      "progress_tracking": ["student", "instructor"],
+      "ai_chat": ["student"],
+      "reflections": ["student"],
+      "quizzes": ["student"]
+    },
+    "content_creation": {
+      "course_creation": ["instructor"],
+      "video_upload": ["instructor"],
+      "quiz_creation": ["instructor"],
+      "lesson_creation": ["instructor"]
+    },
+    "analytics_access": {
+      "personal_analytics": ["student"],
+      "course_analytics": ["instructor"],
+      "student_analytics": ["instructor"],
+      "engagement_metrics": ["instructor"]
+    },
+    "interaction_features": {
+      "student_reflections": ["student"],
+      "instructor_responses": ["instructor"],
+      "ai_assistance": ["student"],
+      "progress_monitoring": ["instructor"]
+    }
+  },
+  "subscription_tiers": {
+    "free": {
+      "ai_daily_limit": 10,
+      "ai_monthly_limit": 50,
+      "max_courses": 3,
+      "features": ["basic_video_watching", "limited_ai_chat"]
+    },
+    "premium": {
+      "ai_daily_limit": 100,
+      "ai_monthly_limit": 1000,
+      "max_courses": 50,
+      "features": ["unlimited_video_watching", "full_ai_features", "priority_support"]
+    },
+    "enterprise": {
+      "ai_daily_limit": -1,
+      "ai_monthly_limit": -1,
+      "max_courses": -1,
+      "features": ["all_features", "custom_branding", "dedicated_support"]
+    }
+  },
+  "api_rate_limits": {
+    "student": {
+      "ai_requests": "100/hour",
+      "video_uploads": "10/hour",
+      "reflection_submissions": "50/hour"
+    },
+    "instructor": {
+      "api_requests": "1000/hour",
+      "video_uploads": "100/hour",
+      "bulk_operations": "10/hour"
+    }
+  },
+  "security_rules": {
+    "data_access": {
+      "student": "own_data_only",
+      "instructor": "enrolled_students_only"
+    },
+    "content_visibility": {
+      "student": "enrolled_courses_only",
+      "instructor": "owned_content_only"
+    },
+    "modification_rights": {
+      "student": "own_profile_and_submissions",
+      "instructor": "owned_courses_and_responses"
+    }
+  },
+  "backend_supported_permissions": {
+    "description": "All permissions currently supported by the Django backend PermissionConstants",
+    "user_management": [
+      "user:create",
+      "user:read", 
+      "user:update",
+      "user:delete",
+      "user:list"
+    ],
+    "course_management": [
+      "course:create",
+      "course:read",
+      "course:update", 
+      "course:delete",
+      "course:list",
+      "course:publish"
+    ],
+    "enrollment_management": [
+      "enrollment:create",
+      "enrollment:read",
+      "enrollment:update",
+      "enrollment:delete", 
+      "enrollment:list"
+    ],
+    "media_management": [
+      "media:upload",
+      "media:read",
+      "media:update",
+      "media:delete",
+      "media:list"
+    ],
+    "analytics": [
+      "analytics:view",
+      "analytics:export"
+    ],
+    "admin": [
+      "role:manage",
+      "system:admin"
+    ]
+  },
+  "future_permissions": {
+    "note": "These permissions are not yet implemented in backend but may be added later",
+    "ai_assistant": [
+      "ai:chat_send",
+      "ai:chat_read", 
+      "ai:request_hint",
+      "ai:request_quiz"
+    ],
+    "video_features": [
+      "video:read",
+      "video:watch",
+      "video:track_progress",
+      "video:upload",
+      "video:update"
+    ],
+    "reflection_features": [
+      "reflection:create",
+      "reflection:read",
+      "reflection:update",
+      "reflection:delete"
+    ],
+    "quiz_features": [
+      "quiz:create",
+      "quiz:attempt", 
+      "quiz:read",
+      "quiz:update"
+    ]
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "created_at": "2025-09-02",
+    "updated_at": "2025-09-02",
+    "description": "User roles and permissions for Unpuzzle MVP learning platform - Backend Compatible",
+    "compatible_with": "Django + Next.js + Supabase Auth",
+    "backend_compatibility": "Matches accounts.permissions.PermissionConstants exactly"
+  }
+}

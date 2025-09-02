@@ -170,6 +170,7 @@ export interface CourseCreationSlice {
   // Save Actions
   saveDraft: () => Promise<void>
   publishCourse: () => Promise<void>
+  unpublishCourse: () => Promise<void>
   toggleAutoSave: () => void
   clearSaveError: () => void
   retryAutoSave: () => Promise<void>
@@ -217,6 +218,8 @@ export const createCourseCreationSlice: StateCreator<CourseCreationSlice> = (set
   },
   
   setCourseInfo: (info) => {
+    console.log('🔧 setCourseInfo called with:', info)
+    console.log('🔧 Current courseCreation before update:', get().courseCreation)
     set(state => ({
       courseCreation: {
         ...state.courseCreation,
@@ -226,6 +229,7 @@ export const createCourseCreationSlice: StateCreator<CourseCreationSlice> = (set
       // Clear save error when user modifies data (gives them a chance to retry)
       saveError: null
     }))
+    console.log('🔧 courseCreation after update:', get().courseCreation)
     
     // Trigger auto-save if enabled AND no previous error exists
     const { courseCreation, saveError } = get()
@@ -1079,6 +1083,14 @@ export const createCourseCreationSlice: StateCreator<CourseCreationSlice> = (set
       const result = await instructorCourseService.createCourse(courseData)
       
       if (result.data) {
+        // The backend returns { success: true, data: { id: ..., ... } }
+        // So we need to extract the nested data
+        const courseResponse = result.data as any
+        const actualCourseData = courseResponse.data || courseResponse
+        const courseId = actualCourseData.id
+        
+        console.log('Course created with ID:', courseId)
+        
         set(state => ({
           isAutoSaving: false,
           saveError: null,
@@ -1086,7 +1098,7 @@ export const createCourseCreationSlice: StateCreator<CourseCreationSlice> = (set
             ...state.courseCreation,
             lastSaved: new Date(),
             hasAutoSaveError: false,
-            id: result.data!.id || state.courseCreation.id
+            id: courseId || state.courseCreation.id
           } : null
         }))
         
@@ -1169,11 +1181,10 @@ export const createCourseCreationSlice: StateCreator<CourseCreationSlice> = (set
         }))
         console.log('Course published successfully!')
         
-        // Update the instructor courses in the store
-        const appState = get() as any
-        if (appState.loadInstructorCourses && appState.profile?.id) {
-          appState.loadInstructorCourses(appState.profile.id)
-        }
+        // NOTE: We don't refresh the instructor courses list here because it can
+        // trigger a reload of the current course data, overwriting our status change.
+        // The list will be refreshed when the user navigates away.
+        console.log('ℹ️ Skipping course list refresh to preserve status change')
       } else {
         throw new Error(result.error || 'Failed to publish course')
       }
@@ -1186,6 +1197,66 @@ export const createCourseCreationSlice: StateCreator<CourseCreationSlice> = (set
           status: 'draft' as const
         } : null
       }))
+    }
+  },
+  
+  unpublishCourse: async () => {
+    console.log('🚀 STORE: unpublishCourse function called!')
+    
+    const state = get()
+    console.log('🚀 STORE: Full state:', state)
+    console.log('🚀 STORE: courseCreation from state:', state.courseCreation)
+    
+    const { courseCreation } = state
+    
+    if (!courseCreation) {
+      console.log('❌ No courseCreation found in state')
+      return
+    }
+    
+    if (!courseCreation.id) {
+      console.log('❌ No course ID found, courseCreation.id is:', courseCreation.id)
+      return
+    }
+    
+    console.log('🔄 Starting unpublish for course:', courseCreation.id)
+    
+    try {
+      // Update status to draft immediately for UI feedback
+      console.log('📝 Setting status to draft (optimistic update)')
+      set(state => ({
+        courseCreation: state.courseCreation ? {
+          ...state.courseCreation,
+          status: 'draft' as const
+        } : null
+      }))
+      
+      // Call unpublish API
+      console.log('📡 Calling unpublish API with course ID:', courseCreation.id)
+      const result = await instructorCourseService.unpublishCourse(courseCreation.id)
+      console.log('📡 API response:', result)
+      
+      if (result.data) {
+        console.log('✅ API success, confirming draft status')
+        // NOTE: We don't refresh the instructor courses list here because it can
+        // trigger a reload of the current course data, overwriting our status change.
+        // The list will be refreshed when the user navigates away.
+        console.log('ℹ️ Skipping course list refresh to preserve status change')
+      } else {
+        console.log('❌ API returned error:', result.error)
+        throw new Error(result.error || 'Failed to unpublish course')
+      }
+    } catch (error) {
+      console.error('❌ Failed to unpublish course:', error)
+      // Revert status on error
+      console.log('🔄 Reverting status to published due to error')
+      set(state => ({
+        courseCreation: state.courseCreation ? {
+          ...state.courseCreation,
+          status: 'published' as const
+        } : null
+      }))
+      throw error
     }
   },
   
