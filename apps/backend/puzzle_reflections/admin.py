@@ -1,3 +1,5 @@
 from django.contrib import admin
+from .models import PuzzleReflection
 
-# Register your models here.
+# Simple admin registration
+admin.site.register(PuzzleReflection)
