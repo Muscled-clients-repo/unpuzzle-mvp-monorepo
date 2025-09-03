@@ -1,6 +1,9 @@
 """
 Authentication and user management views.
 """
+import time
+import logging
+import os
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -8,10 +11,11 @@ from rest_framework.response import Response
 from django.utils import timezone
 from django.db import transaction
 from django.conf import settings
-import os
+from django.core.cache import cache
+from django.core.paginator import Paginator
 
 from app.services.supabase_client import supabase_service
-from .models import UserProfile
+from .models import UserProfile, Session
 from .permissions import PermissionService, RoleConstants
 from .serializers import (
     SignUpSerializer,
@@ -21,8 +25,6 @@ from .serializers import (
     UserProfileSerializer,
     UpdateProfileSerializer
 )
-from .models import Session
-from django.core.paginator import Paginator
 
 
 def set_auth_cookie(response, access_token):
@@ -315,23 +317,61 @@ def reset_password(request):
 @api_view(['GET'])
 def get_profile(request):
     """
-    Get current user's profile.
+    Get current user's profile (optimized with caching).
     Requires authentication.
     """
+    logger = logging.getLogger('profile_performance')
+    start_time = time.time()
+    
+    # Debug print to verify the optimized code is running
+    print(f"[PROFILE DEBUG] Optimized get_profile called for user request")
+    
     # Get user ID from request (set by middleware)
     user_id = getattr(request, 'user_id', None)
     if not user_id:
+        print(f"[PROFILE DEBUG] No user_id found in request")
         return Response(
             {'error': 'Not authenticated'},
             status=status.HTTP_401_UNAUTHORIZED
         )
     
+    print(f"[PROFILE DEBUG] Checking cache for user {user_id}")
+    
+    # Try cache first for instant response
+    cache_key = f"user_profile:{user_id}"
+    cached_profile = cache.get(cache_key)
+    
+    if cached_profile is not None:
+        cache_time = (time.time() - start_time) * 1000
+        print(f"[PROFILE DEBUG] CACHE HIT! Returning cached data in {cache_time:.2f}ms")
+        logger.info(f"Profile cache HIT for user {user_id} - {cache_time:.2f}ms")
+        return Response(cached_profile, status=status.HTTP_200_OK)
+    
+    print(f"[PROFILE DEBUG] CACHE MISS - querying database")
+    
     try:
-        profile = UserProfile.objects.get(supabase_user_id=user_id)
-        return Response(
-            UserProfileSerializer(profile).data,
-            status=status.HTTP_200_OK
-        )
+        # Optimized database query - load all related data in one go
+        # This prevents N+1 queries by loading subscription and plan in single query
+        profile = UserProfile.objects.select_related(
+            'subscription',
+            'subscription__plan'
+        ).prefetch_related(
+            'user_roles__role'
+        ).get(supabase_user_id=user_id)
+        
+        # Serialize the profile data (same format as before - no breaking changes)
+        profile_data = UserProfileSerializer(profile).data
+        
+        # Cache the serialized data for 30 minutes (1800 seconds) for better performance
+        # This significantly reduces database load since profile data doesn't change often
+        cache.set(cache_key, profile_data, 1800)
+        
+        db_time = (time.time() - start_time) * 1000
+        print(f"[PROFILE DEBUG] Database query completed in {db_time:.2f}ms - caching result")
+        logger.info(f"Profile cache MISS for user {user_id} - DB query took {db_time:.2f}ms")
+        
+        return Response(profile_data, status=status.HTTP_200_OK)
+        
     except UserProfile.DoesNotExist:
         return Response(
             {'error': 'Profile not found'},
@@ -371,6 +411,13 @@ def update_profile(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     serializer.save()
+    
+    # Clear the profile cache since data was updated
+    cache_key = f"user_profile:{user_id}"
+    cache.delete(cache_key)
+    
+    logger = logging.getLogger('profile_performance')
+    logger.debug(f"Profile cache cleared for user {user_id} after update")
     
     return Response(
         UserProfileSerializer(profile).data,

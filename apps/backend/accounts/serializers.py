@@ -73,7 +73,7 @@ class PasswordResetSerializer(serializers.Serializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    """Serializer for user profile"""
+    """Optimized serializer for user profile (avoids database queries from properties)"""
     
     class Meta:
         model = UserProfile
@@ -101,6 +101,41 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at'
         ]
+    
+    def to_representation(self, instance):
+        """Override to prevent property method calls that cause database queries"""
+        # Get the standard fields without property methods
+        data = super().to_representation(instance)
+        
+        # Add subscription data only if explicitly prefetched to avoid queries
+        # This prevents the property methods from being called
+        if hasattr(instance, '_prefetched_objects_cache') or hasattr(instance, 'subscription'):
+            try:
+                if hasattr(instance, 'subscription') and instance.subscription:
+                    # Only access if already loaded to avoid database queries
+                    subscription = instance.subscription
+                    data['subscription_status'] = subscription.status
+                    data['subscription_plan'] = subscription.plan_id
+                    if hasattr(subscription, 'plan') and subscription.plan:
+                        data['subscription_display_name'] = subscription.plan.display_name
+                    else:
+                        data['subscription_display_name'] = 'Free Plan'
+                else:
+                    data['subscription_status'] = 'free'
+                    data['subscription_plan'] = 'free' 
+                    data['subscription_display_name'] = 'Free Plan'
+            except:
+                # Fallback to free if any error occurs
+                data['subscription_status'] = 'free'
+                data['subscription_plan'] = 'free'
+                data['subscription_display_name'] = 'Free Plan'
+        else:
+            # Default values when not prefetched
+            data['subscription_status'] = 'free'
+            data['subscription_plan'] = 'free'
+            data['subscription_display_name'] = 'Free Plan'
+            
+        return data
 
 
 class UpdateProfileSerializer(serializers.ModelSerializer):

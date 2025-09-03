@@ -5,27 +5,44 @@ import logging
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.core.cache import cache
-from .models import UserRole, Role
+from .models import UserRole, Role, UserProfile
 from .permissions import PermissionService
 
 logger = logging.getLogger(__name__)
 
+
+# Profile cache invalidation signals
+@receiver(post_save, sender=UserProfile)
+def clear_profile_cache_on_update(sender, instance, **kwargs):
+    """Clear profile cache when UserProfile is updated"""
+    cache_key = f"user_profile:{instance.supabase_user_id}"
+    cache.delete(cache_key)
+    logger.debug(f"Profile cache cleared for user {instance.supabase_user_id} on profile update")
+
 @receiver(post_save, sender=UserRole)
 def clear_user_cache_on_role_change(sender, instance, created, **kwargs):
-    """Clear user permissions cache when a role is assigned or updated"""
+    """Clear user permissions and profile cache when a role is assigned or updated"""
     user_id = str(instance.user.supabase_user_id)
     PermissionService.clear_user_permissions_cache(user_id)
     
+    # Also clear profile cache since it may include role information
+    profile_cache_key = f"user_profile:{user_id}"
+    cache.delete(profile_cache_key)
+    
     action = "assigned" if created else "updated"
-    logger.info(f"Role {instance.role.name} {action} to user {user_id} - cache cleared")
+    logger.info(f"Role {instance.role.name} {action} to user {user_id} - permission and profile cache cleared")
 
 @receiver(post_delete, sender=UserRole)
 def clear_user_cache_on_role_removal(sender, instance, **kwargs):
-    """Clear user permissions cache when a role is removed"""
+    """Clear user permissions and profile cache when a role is removed"""
     user_id = str(instance.user.supabase_user_id)
     PermissionService.clear_user_permissions_cache(user_id)
     
-    logger.info(f"Role {instance.role.name} removed from user {user_id} - cache cleared")
+    # Also clear profile cache since it may include role information
+    profile_cache_key = f"user_profile:{user_id}"
+    cache.delete(profile_cache_key)
+    
+    logger.info(f"Role {instance.role.name} removed from user {user_id} - permission and profile cache cleared")
 
 @receiver(post_save, sender=Role)
 def clear_affected_users_cache_on_role_update(sender, instance, created, **kwargs):
