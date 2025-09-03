@@ -93,8 +93,18 @@ ASGI_APPLICATION = 'app.asgi.application'
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if DATABASE_URL:
+    db_config = dj_database_url.parse(DATABASE_URL)
+    
+    # Add PostgreSQL optimizations for Supabase
+    db_config['CONN_MAX_AGE'] = 600  # Keep connections alive for 10 minutes
+    db_config['CONN_HEALTH_CHECKS'] = True  # Enable connection health checks
+    db_config['OPTIONS'] = {
+        'connect_timeout': 10,  # Connection timeout in seconds
+        'options': '-c statement_timeout=30000',  # 30 second statement timeout
+    }
+    
     DATABASES = {
-        'default': dj_database_url.parse(DATABASE_URL)
+        'default': db_config
     }
 else:
     DATABASES = {
