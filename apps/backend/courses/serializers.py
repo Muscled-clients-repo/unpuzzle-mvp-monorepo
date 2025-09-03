@@ -82,7 +82,7 @@ class InstructorSerializer(serializers.ModelSerializer):
 
 
 class CourseListSerializer(serializers.ModelSerializer):
-    """Serializer for course list views (public)"""
+    """Serializer for course list views (public) - OPTIMIZED"""
     instructor = InstructorSerializer(read_only=True)
     category = CourseCategorySerializer(read_only=True)
     is_enrolled = serializers.SerializerMethodField()
@@ -100,9 +100,15 @@ class CourseListSerializer(serializers.ModelSerializer):
         ]
     
     def get_is_enrolled(self, obj):
-        """Check if current user is enrolled"""
+        """Check if current user is enrolled (OPTIMIZED)"""
+        # First check if we have the annotated field from the optimized query
+        if hasattr(obj, 'user_is_enrolled'):
+            return obj.user_is_enrolled
+        
+        # Fallback to database query if annotation is not present
         request = self.context.get('request')
         if request and hasattr(request, 'user_id'):
+            # This should rarely be hit due to the annotation in the view
             return Enrollment.objects.filter(
                 user__supabase_user_id=request.user_id,
                 course=obj,
@@ -111,6 +117,16 @@ class CourseListSerializer(serializers.ModelSerializer):
         return False
     
     def get_sections_count(self, obj):
+        """Get sections count (OPTIMIZED)"""
+        # First check if we have the annotated field from the optimized query
+        if hasattr(obj, 'published_sections_count'):
+            return obj.published_sections_count
+        
+        # Fallback to counting prefetched sections if available
+        if hasattr(obj, '_prefetched_objects_cache') and 'sections' in obj._prefetched_objects_cache:
+            return len([s for s in obj.sections.all() if s.is_published])
+        
+        # Last resort: database query (should rarely be hit)
         return obj.sections.filter(is_published=True).count()
 
 

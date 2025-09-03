@@ -2,14 +2,17 @@
 Course management views.
 """
 import logging
+import time
+import hashlib
 from rest_framework import status, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db.models import Q, Avg, Count, F, Sum
+from django.db.models import Q, Avg, Count, F, Sum, Prefetch, Exists, OuterRef
 from django.db import transaction, IntegrityError
+from django.core.cache import cache
 from accounts.models import UserProfile, UserRole, Role
 from accounts.permissions import PermissionService, PermissionConstants
 from decimal import Decimal
@@ -54,12 +57,61 @@ def get_user_profile(request):
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def get_courses(request):
-    """Get all public courses with filtering and sorting"""
+    """Get all public courses with filtering and sorting (OPTIMIZED)"""
+    start_time = time.time()
+    logger.debug("[COURSE PERF] Starting get_courses endpoint")
     
-    # Base queryset - accept both 'active' and 'published' status
+    # Generate cache key based on request parameters
+    cache_key_parts = [
+        'courses_list',
+        request.GET.get('page', '1'),
+        request.GET.get('limit', '20'),
+        request.GET.get('search', ''),
+        request.GET.get('difficulty', ''),
+        request.GET.get('category', ''),
+        request.GET.get('priceRange', ''),
+        request.GET.get('minRating', ''),
+        request.GET.get('instructor', ''),
+        request.GET.get('sortBy', 'newest'),
+    ]
+    
+    # Add user ID to cache key if authenticated (for is_enrolled field)
+    if hasattr(request, 'user_id') and request.user_id:
+        cache_key_parts.append(str(request.user_id))
+    
+    # Create hash for cache key to avoid length issues
+    cache_key_str = '|'.join(str(part) for part in cache_key_parts)
+    cache_key_hash = hashlib.md5(cache_key_str.encode()).hexdigest()
+    cache_key = f"courses:v2:{cache_key_hash}"
+    
+    # Try to get from cache
+    cached_response = cache.get(cache_key)
+    if cached_response is not None:
+        cache_time = (time.time() - start_time) * 1000
+        logger.debug(f"[COURSE PERF] Cache HIT - returned in {cache_time:.2f}ms")
+        return Response(cached_response)
+    
+    logger.debug("[COURSE PERF] Cache MISS - querying database")
+    
+    # Optimized queryset with select_related, prefetch_related, and only()
+    # Using .only() to fetch only required fields reduces data transfer from PostgreSQL
     queryset = Course.objects.filter(
         is_published=True, 
         status__in=['published', 'active']
+    ).only(
+        # Only fetch fields needed for CourseListSerializer
+        'id', 'title', 'slug', 'short_description', 'thumbnail',
+        'price', 'discount_price', 'currency', 'is_free',
+        'duration', 'difficulty', 'language',
+        'enrollment_count', 'rating_average', 'rating_count',
+        'is_published', 'published_at', 'created_at', 'updated_at',
+        'instructor_id', 'category_id', 'tags'  # Foreign keys and JSONField
+    ).select_related(
+        'instructor',  # Avoid N+1 for instructor
+        'category'      # Avoid N+1 for category
+    ).prefetch_related(
+        Prefetch('sections', 
+                 queryset=CourseSection.objects.filter(is_published=True).only('id', 'course_id', 'is_published'))
     )
     
     # Filtering
@@ -115,32 +167,102 @@ def get_courses(request):
     else:
         queryset = queryset.order_by('-created_at')
     
+    # Add enrollment annotation for authenticated users to avoid N+1 queries
+    if hasattr(request, 'user_id') and request.user_id:
+        from enrollments.models import Enrollment
+        enrollment_subquery = Enrollment.objects.filter(
+            user__supabase_user_id=request.user_id,
+            course=OuterRef('pk'),
+            status='active'
+        )
+        queryset = queryset.annotate(
+            user_is_enrolled=Exists(enrollment_subquery)
+        )
+    
+    # Add sections count annotation to avoid N+1 queries
+    queryset = queryset.annotate(
+        published_sections_count=Count(
+            'sections',
+            filter=Q(sections__is_published=True)
+        )
+    )
+    
     # Pagination
     paginator = StandardResultsPagination()
     page = paginator.paginate_queryset(queryset, request)
     
     if page is not None:
         serializer = CourseListSerializer(page, many=True, context={'request': request})
-        return paginator.get_paginated_response(serializer.data)
+        response_data = paginator.get_paginated_response(serializer.data).data
+        
+        # Cache the response for 5 minutes
+        cache.set(cache_key, response_data, 300)
+        
+        query_time = (time.time() - start_time) * 1000
+        logger.debug(f"[COURSE PERF] Query completed in {query_time:.2f}ms - cached for 5 minutes")
+        
+        return Response(response_data)
     
     serializer = CourseListSerializer(queryset, many=True, context={'request': request})
-    return Response({
+    response_data = {
         'success': True,
         'data': serializer.data
-    })
+    }
+    
+    # Cache the response
+    cache.set(cache_key, response_data, 300)
+    
+    query_time = (time.time() - start_time) * 1000
+    logger.debug(f"[COURSE PERF] Query completed in {query_time:.2f}ms - cached for 5 minutes")
+    
+    return Response(response_data)
 
 
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def get_course_detail(request, course_id):
-    """Get detailed course information"""
-    course = get_object_or_404(Course, id=course_id, is_published=True, status__in=['published', 'active'])
+    """Get detailed course information (OPTIMIZED)"""
+    start_time = time.time()
+    
+    # Generate cache key
+    cache_key_parts = ['course_detail', str(course_id)]
+    if hasattr(request, 'user_id') and request.user_id:
+        cache_key_parts.append(str(request.user_id))
+    cache_key = ':'.join(cache_key_parts)
+    
+    # Try to get from cache
+    cached_response = cache.get(cache_key)
+    if cached_response is not None:
+        cache_time = (time.time() - start_time) * 1000
+        logger.debug(f"[COURSE PERF] Course detail cache HIT - returned in {cache_time:.2f}ms")
+        return Response(cached_response)
+    
+    # Optimized query with select_related and prefetch_related
+    course = get_object_or_404(
+        Course.objects.select_related(
+            'instructor',
+            'category'
+        ).prefetch_related(
+            Prefetch('sections', queryset=CourseSection.objects.filter(is_published=True).order_by('order'))
+        ),
+        id=course_id,
+        is_published=True,
+        status__in=['published', 'active']
+    )
     
     serializer = CourseDetailSerializer(course, context={'request': request})
-    return Response({
+    response_data = {
         'success': True,
         'data': serializer.data
-    })
+    }
+    
+    # Cache for 10 minutes
+    cache.set(cache_key, response_data, 600)
+    
+    query_time = (time.time() - start_time) * 1000
+    logger.debug(f"[COURSE PERF] Course detail query completed in {query_time:.2f}ms - cached for 10 minutes")
+    
+    return Response(response_data)
 
 
 @api_view(['GET'])
@@ -653,30 +775,65 @@ def get_instructor_courses(request):
         }, status=403)
     
     if request.method == 'GET':
-        # List instructor's courses
+        logger.debug(f"[INSTRUCTOR PERF] Starting get_instructor_courses for user {user_profile.supabase_user_id}")
+        start_time = time.time()
+        
+        # Generate cache key
+        cache_key = f"instructor_courses:{user_profile.supabase_user_id}"
+        
+        # Try to get from cache
+        cached_response = cache.get(cache_key)
+        if cached_response is not None:
+            cache_time = (time.time() - start_time) * 1000
+            logger.debug(f"[INSTRUCTOR PERF] Cache HIT - returned in {cache_time:.2f}ms")
+            return Response(cached_response)
+        
+        logger.debug("[INSTRUCTOR PERF] Cache MISS - querying database")
+        
+        # Optimized query with prefetch_related and annotations
+        from enrollments.models import Enrollment
         courses = Course.objects.filter(
             instructor=user_profile
-        ).select_related('category').order_by('-created_at')
+        ).select_related(
+            'category'
+        ).prefetch_related(
+            Prefetch('sections', queryset=CourseSection.objects.filter(is_published=True).order_by('order')),
+            Prefetch('enrollments', queryset=Enrollment.objects.filter(status='active').select_related('user'))
+        ).annotate(
+            active_students_count=Count('enrollments', filter=Q(enrollments__status='active')),
+            total_revenue=Sum('enrollments__payment_amount', filter=Q(enrollments__status='active')),
+            completed_students=Count('enrollments', filter=Q(enrollments__status='active', enrollments__progress_percentage__gte=100))
+        ).order_by('-created_at')
         
-        # Add analytics data
+        # Build response with analytics
         courses_data = []
         for course in courses:
             serializer = CourseDetailSerializer(course, context={'request': request})
             course_data = serializer.data
             
-            # Add instructor-specific analytics
+            # Use annotated values for analytics (no additional queries)
+            total_students = course.active_students_count
+            completion_rate = (course.completed_students / total_students * 100) if total_students > 0 else 0
+            
             course_data['analytics'] = {
-                'total_revenue': course.enrollments.filter(status='active').aggregate(
-                    Sum('payment_amount'))['payment_amount__sum'] or 0,
-                'active_students': course.enrollments.filter(status='active').count(),
-                'completion_rate': _calculate_completion_rate(course)
+                'total_revenue': float(course.total_revenue or 0),
+                'active_students': course.active_students_count,
+                'completion_rate': completion_rate
             }
             courses_data.append(course_data)
         
-        return Response({
+        response_data = {
             'success': True,
             'data': courses_data
-        })
+        }
+        
+        # Cache for 5 minutes
+        cache.set(cache_key, response_data, 300)
+        
+        query_time = (time.time() - start_time) * 1000
+        logger.debug(f"[INSTRUCTOR PERF] Query completed in {query_time:.2f}ms - cached for 5 minutes")
+        
+        return Response(response_data)
     
     elif request.method == 'POST':
         # Create a new course
@@ -685,6 +842,10 @@ def get_instructor_courses(request):
             return Response({'error': serializer.errors, 'success': False}, status=400)
         
         course = serializer.save()
+        
+        # Clear instructor's course cache when new course is created
+        cache_key = f"instructor_courses:{user_profile.supabase_user_id}"
+        cache.delete(cache_key)
         
         # Return detailed course data
         response_serializer = CourseDetailSerializer(course, context={'request': request})
@@ -708,16 +869,49 @@ def get_instructor_course_detail(request, course_id):
             'message': 'You need instructor permissions to access this endpoint'
         }, status=403)
     
-    course = get_object_or_404(Course, id=course_id, instructor=user_profile)
-    
     if request.method == 'GET':
+        start_time = time.time()
+        
+        # Generate cache key for instructor course detail
+        cache_key = f"instructor_course_detail:{user_profile.supabase_user_id}:{course_id}"
+        
+        # Try to get from cache
+        cached_response = cache.get(cache_key)
+        if cached_response is not None:
+            cache_time = (time.time() - start_time) * 1000
+            logger.debug(f"[INSTRUCTOR PERF] Course detail cache HIT - returned in {cache_time:.2f}ms")
+            return Response(cached_response)
+        
+        # Optimized query with prefetch
+        course = get_object_or_404(
+            Course.objects.select_related(
+                'instructor',
+                'category'
+            ).prefetch_related(
+                Prefetch('sections', queryset=CourseSection.objects.filter(is_published=True).order_by('order'))
+            ),
+            id=course_id,
+            instructor=user_profile
+        )
+        
         serializer = CourseDetailSerializer(course, context={'request': request})
-        return Response({
+        response_data = {
             'success': True,
             'data': serializer.data
-        })
+        }
+        
+        # Cache for 5 minutes
+        cache.set(cache_key, response_data, 300)
+        
+        query_time = (time.time() - start_time) * 1000
+        logger.debug(f"[INSTRUCTOR PERF] Course detail query completed in {query_time:.2f}ms")
+        
+        return Response(response_data)
     
     elif request.method in ['PUT', 'PATCH']:
+        # Get the course for update
+        course = get_object_or_404(Course, id=course_id, instructor=user_profile)
+        
         # Update course
         partial = request.method == 'PATCH'
         serializer = CourseCreateUpdateSerializer(
@@ -730,6 +924,11 @@ def get_instructor_course_detail(request, course_id):
             return Response({'error': serializer.errors, 'success': False}, status=400)
         
         course = serializer.save()
+        
+        # Clear caches when course is updated
+        cache.delete(f"instructor_course_detail:{user_profile.supabase_user_id}:{course_id}")
+        cache.delete(f"instructor_courses:{user_profile.supabase_user_id}")
+        cache.delete(f"course_detail:{course_id}")
         
         response_serializer = CourseDetailSerializer(course, context={'request': request})
         return Response({
