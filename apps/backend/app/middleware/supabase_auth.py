@@ -1,11 +1,17 @@
 """
 Supabase authentication middleware for Django.
-Validates JWT tokens from Supabase Auth.
+Validates JWT tokens from Supabase Auth with optimized caching.
 """
 import os
 import jwt
+import time
+import hashlib
+import logging
 from django.http import JsonResponse
+from django.core.cache import cache
 from supabase import create_client, Client
+
+logger = logging.getLogger('supabase_auth')
 
 
 class SupabaseAuthMiddleware:
@@ -16,6 +22,10 @@ class SupabaseAuthMiddleware:
         self.supabase_url = os.environ.get('SUPABASE_URL')
         self.supabase_anon_key = os.environ.get('SUPABASE_ANON_KEY')
         self.jwt_secret = os.environ.get('SUPABASE_JWT_SECRET')
+        
+        # JWT Cache settings
+        self.jwt_cache_prefix = 'jwt_verified:'
+        self.jwt_cache_timeout = 900  # 15 minutes default, will be overridden by token exp
         
         if self.supabase_url and self.supabase_anon_key:
             self.supabase: Client = create_client(self.supabase_url, self.supabase_anon_key)
@@ -74,29 +84,49 @@ class SupabaseAuthMiddleware:
         if not token:
             return JsonResponse({'error': 'No authorization token provided'}, status=401)
         
-        try:
-            # Verify JWT token
-            payload = jwt.decode(
-                token,
-                self.jwt_secret,
-                algorithms=['HS256'],
-                audience='authenticated'
-            )
-            
-            # Add user info to request
-            request.supabase_user = payload
-            request.user_id = payload.get('sub')
-            
-        except jwt.ExpiredSignatureError:
-            response = JsonResponse({'error': 'Token has expired'}, status=401)
-            # Clear expired cookie if it exists
-            response.delete_cookie('auth_token')
-            return response
-        except jwt.InvalidTokenError as e:
-            response = JsonResponse({'error': f'Invalid token: {str(e)}'}, status=401)
-            # Clear invalid cookie if it exists
-            response.delete_cookie('auth_token')
-            return response
+        # Try to get cached JWT payload first
+        start_time = time.time()
+        payload = self._get_cached_jwt_payload(token)
+        
+        if payload is None:
+            try:
+                # Verify JWT token (expensive operation)
+                logger.debug("JWT cache miss - verifying token")
+                payload = jwt.decode(
+                    token,
+                    self.jwt_secret,
+                    algorithms=['HS256'],
+                    audience='authenticated'
+                )
+                
+                # Cache the verified payload
+                self._cache_jwt_payload(token, payload)
+                
+            except jwt.ExpiredSignatureError:
+                # Remove expired token from cache if it exists
+                self._invalidate_jwt_cache(token)
+                response = JsonResponse({'error': 'Token has expired'}, status=401)
+                response.delete_cookie('auth_token')
+                return response
+            except jwt.InvalidTokenError as e:
+                # Remove invalid token from cache if it exists  
+                self._invalidate_jwt_cache(token)
+                response = JsonResponse({'error': f'Invalid token: {str(e)}'}, status=401)
+                response.delete_cookie('auth_token')
+                return response
+        else:
+            logger.debug("JWT cache hit - using cached payload")
+        
+        # Add user info to request
+        request.supabase_user = payload
+        request.user_id = payload.get('sub')
+        
+        # Pre-load user permissions and roles for the request (performance optimization)
+        self._preload_user_permissions(request)
+        
+        # Log performance for monitoring
+        auth_time = (time.time() - start_time) * 1000  # Convert to ms
+        logger.debug(f"Auth middleware took {auth_time:.2f}ms for user {payload.get('sub')}")
         
         response = self.get_response(request)
         return response
@@ -116,3 +146,121 @@ class SupabaseAuthMiddleware:
             return auth_header.split(' ')[1]
         
         return None
+    
+    def _get_token_cache_key(self, token):
+        """
+        Generate a secure cache key for the JWT token
+        """
+        # Use SHA256 hash to avoid storing actual token in cache key
+        token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
+        return f"{self.jwt_cache_prefix}{token_hash}"
+    
+    def _get_cached_jwt_payload(self, token):
+        """
+        Try to get JWT payload from cache
+        """
+        cache_key = self._get_token_cache_key(token)
+        cached_data = cache.get(cache_key)
+        
+        if cached_data is not None:
+            payload = cached_data.get('payload')
+            expires_at = cached_data.get('expires_at', 0)
+            
+            # Check if token is still valid (not expired)
+            current_time = int(time.time())
+            if expires_at > current_time:
+                return payload
+            else:
+                # Token expired, remove from cache
+                cache.delete(cache_key)
+                logger.debug("Cached JWT token expired, removing from cache")
+        
+        return None
+    
+    def _cache_jwt_payload(self, token, payload):
+        """
+        Cache the JWT payload with appropriate TTL
+        """
+        try:
+            cache_key = self._get_token_cache_key(token)
+            expires_at = payload.get('exp', 0)
+            current_time = int(time.time())
+            
+            # Calculate cache timeout based on token expiry
+            if expires_at > current_time:
+                # Cache for the remaining token lifetime or max 15 minutes
+                cache_timeout = min(expires_at - current_time, self.jwt_cache_timeout)
+                
+                cached_data = {
+                    'payload': payload,
+                    'expires_at': expires_at,
+                    'cached_at': current_time
+                }
+                
+                cache.set(cache_key, cached_data, cache_timeout)
+                logger.debug(f"JWT payload cached for {cache_timeout} seconds")
+            else:
+                logger.warning("Attempted to cache expired JWT token")
+                
+        except Exception as e:
+            logger.error(f"Failed to cache JWT payload: {e}")
+    
+    def _invalidate_jwt_cache(self, token):
+        """
+        Remove JWT token from cache (used for expired/invalid tokens)
+        """
+        try:
+            cache_key = self._get_token_cache_key(token)
+            cache.delete(cache_key)
+            logger.debug("JWT token removed from cache")
+        except Exception as e:
+            logger.error(f"Failed to invalidate JWT cache: {e}")
+    
+    def _preload_user_permissions(self, request):
+        """
+        Pre-load user permissions and roles to avoid multiple database queries per request
+        """
+        try:
+            from accounts.permissions import PermissionService
+            
+            user_id = request.user_id
+            if user_id:
+                # Load permissions and roles once for the entire request
+                # These will be cached, so subsequent calls will be fast
+                permissions = PermissionService.get_user_permissions(user_id)
+                roles = PermissionService.get_user_roles(user_id)
+                
+                # Attach to request for fast access in views
+                request.user_permissions = set(permissions)  # Use set for O(1) lookups
+                request.user_roles = set(roles)
+                
+                # Add helper methods to request object for convenience
+                def has_permission(permission: str) -> bool:
+                    return permission in request.user_permissions
+                
+                def has_any_permission(perms: list) -> bool:
+                    return any(perm in request.user_permissions for perm in perms)
+                
+                def has_all_permissions(perms: list) -> bool:
+                    return all(perm in request.user_permissions for perm in perms)
+                
+                def has_role(role: str) -> bool:
+                    return role in request.user_roles
+                
+                # Attach helper methods to request
+                request.has_permission = has_permission
+                request.has_any_permission = has_any_permission  
+                request.has_all_permissions = has_all_permissions
+                request.has_role = has_role
+                
+                logger.debug(f"Pre-loaded {len(permissions)} permissions and {len(roles)} roles for user {user_id}")
+                
+        except Exception as e:
+            logger.error(f"Failed to preload user permissions: {e}")
+            # Set empty permissions as fallback
+            request.user_permissions = set()
+            request.user_roles = set()
+            request.has_permission = lambda perm: False
+            request.has_any_permission = lambda perms: False
+            request.has_all_permissions = lambda perms: False
+            request.has_role = lambda role: False

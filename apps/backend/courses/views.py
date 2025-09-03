@@ -645,8 +645,8 @@ def get_instructor_courses(request):
     if not user_profile:
         return Response({'error': 'Authentication required'}, status=401)
     
-    # Check if user has instructor role or higher
-    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_CREATE):
+    # Check if user has instructor role or higher (optimized - uses pre-loaded permissions)
+    if not hasattr(request, 'has_permission') or not request.has_permission(PermissionConstants.COURSE_CREATE):
         return Response({
             'error': 'Instructor role required',
             'message': 'You need instructor permissions to access this endpoint'
@@ -702,7 +702,7 @@ def get_instructor_course_detail(request, course_id):
         return Response({'error': 'Authentication required'}, status=401)
     
     # Check if user has instructor role
-    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_UPDATE):
+    if not hasattr(request, 'has_permission') or not request.has_permission(PermissionConstants.COURSE_UPDATE):
         return Response({
             'error': 'Instructor role required',
             'message': 'You need instructor permissions to access this endpoint'
@@ -746,7 +746,7 @@ def create_course(request):
         return Response({'error': 'Authentication required'}, status=401)
     
     # Check if user has instructor role
-    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_CREATE):
+    if not hasattr(request, 'has_permission') or not request.has_permission(PermissionConstants.COURSE_CREATE):
         return Response({
             'error': 'Instructor role required',
             'message': 'You need instructor permissions to create courses'
@@ -774,7 +774,7 @@ def update_course(request, course_id):
         return Response({'error': 'Authentication required'}, status=401)
     
     # Check if user has instructor role
-    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_UPDATE):
+    if not hasattr(request, 'has_permission') or not request.has_permission(PermissionConstants.COURSE_UPDATE):
         return Response({
             'error': 'Instructor role required',
             'message': 'You need instructor permissions to update courses'
@@ -803,7 +803,7 @@ def delete_course(request, course_id):
         return Response({'error': 'Authentication required'}, status=401)
     
     # Check if user has instructor role
-    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_DELETE):
+    if not hasattr(request, 'has_permission') or not request.has_permission(PermissionConstants.COURSE_DELETE):
         return Response({
             'error': 'Instructor role required',
             'message': 'You need instructor permissions to delete courses'
@@ -830,7 +830,7 @@ def publish_course(request, course_id):
         return Response({'error': 'Authentication required'}, status=401)
     
     # Check if user has publish permission
-    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_PUBLISH):
+    if not hasattr(request, 'has_permission') or not request.has_permission(PermissionConstants.COURSE_PUBLISH):
         return Response({
             'error': 'Permission denied',
             'message': 'You need instructor permissions to publish courses'
@@ -865,7 +865,7 @@ def unpublish_course(request, course_id):
         return Response({'error': 'Authentication required'}, status=401)
     
     # Check if user has publish permission
-    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_PUBLISH):
+    if not hasattr(request, 'has_permission') or not request.has_permission(PermissionConstants.COURSE_PUBLISH):
         return Response({
             'error': 'Permission denied',
             'message': 'You need instructor permissions to unpublish courses'
@@ -891,7 +891,7 @@ def duplicate_course(request, course_id):
         return Response({'error': 'Authentication required'}, status=401)
     
     # Check if user has instructor role
-    if not PermissionService.has_permission(request.user_id, PermissionConstants.COURSE_CREATE):
+    if not hasattr(request, 'has_permission') or not request.has_permission(PermissionConstants.COURSE_CREATE):
         return Response({
             'error': 'Instructor role required',
             'message': 'You need instructor permissions to duplicate courses'

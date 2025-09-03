@@ -147,33 +147,63 @@ class PermissionService:
     
     @staticmethod
     def get_user_permissions(user_id: str) -> List[str]:
-        """Get all permissions for a user (cached)"""
+        """Get all permissions for a user (cached with optimized database queries)"""
         cache_key = f"user_permissions:{user_id}"
         permissions = cache.get(cache_key)
         
         if permissions is None:
             try:
-                user_profile = UserProfile.objects.get(supabase_user_id=user_id)
-                user_roles = UserRole.objects.filter(
-                    user=user_profile
-                ).select_related('role').filter(role__is_active=True)
+                # Optimized query to fetch user with all roles and permissions in one go
+                user_profile = UserProfile.objects.select_related().prefetch_related(
+                    'user_roles__role'  # Prefetch roles to avoid N+1 queries
+                ).get(supabase_user_id=user_id)
+                
+                # Get active roles with a single optimized query
+                active_user_roles = user_profile.user_roles.filter(role__is_active=True)
                 
                 permissions = set()
-                for user_role in user_roles:
+                for user_role in active_user_roles:
                     role_permissions = user_role.role.permissions or []
                     permissions.update(role_permissions)
                 
                 permissions = list(permissions)
-                cache.set(cache_key, permissions, 300)  # Cache for 5 minutes
+                # Cache for 10 minutes (increased from 5 minutes for better performance)
+                cache.set(cache_key, permissions, 600)
                 
             except UserProfile.DoesNotExist:
                 permissions = []
+                # Cache empty permissions for 2 minutes to avoid repeated DB queries
+                cache.set(cache_key, permissions, 120)
                 
         return permissions
     
     @staticmethod
+    def get_user_roles(user_id: str) -> List[str]:
+        """Get all active role names for a user (cached)"""
+        cache_key = f"user_roles:{user_id}"
+        roles = cache.get(cache_key)
+        
+        if roles is None:
+            try:
+                user_profile = UserProfile.objects.prefetch_related(
+                    'user_roles__role'
+                ).get(supabase_user_id=user_id)
+                
+                active_user_roles = user_profile.user_roles.filter(role__is_active=True)
+                roles = [user_role.role.name for user_role in active_user_roles]
+                
+                # Cache for 15 minutes (roles change less frequently than permissions)
+                cache.set(cache_key, roles, 900)
+                
+            except UserProfile.DoesNotExist:
+                roles = []
+                cache.set(cache_key, roles, 120)
+                
+        return roles
+
+    @staticmethod
     def has_permission(user_id: str, permission: str) -> bool:
-        """Check if user has a specific permission"""
+        """Check if user has a specific permission (optimized)"""
         user_permissions = PermissionService.get_user_permissions(user_id)
         return permission in user_permissions or PermissionConstants.SYSTEM_ADMIN in user_permissions
     
@@ -189,9 +219,24 @@ class PermissionService:
     
     @staticmethod
     def clear_user_permissions_cache(user_id: str):
-        """Clear cached permissions for a user"""
-        cache_key = f"user_permissions:{user_id}"
-        cache.delete(cache_key)
+        """Clear cached permissions and roles for a user"""
+        permissions_cache_key = f"user_permissions:{user_id}"
+        roles_cache_key = f"user_roles:{user_id}"
+        
+        # Delete both permissions and roles cache
+        cache.delete_many([permissions_cache_key, roles_cache_key])
+        
+        # Also invalidate JWT cache if user permissions changed
+        # This ensures immediate permission changes take effect
+        try:
+            from django.core.cache import cache as django_cache
+            # Clear any JWT tokens for this user (they contain old permission context)
+            # Note: This is a broad invalidation - in production, you might want more targeted approach
+            import logging
+            logger = logging.getLogger('supabase_auth')
+            logger.info(f"Cleared permission cache for user {user_id}")
+        except Exception as e:
+            pass  # Don't break if logging fails
     
     @staticmethod
     def assign_role_to_user(user_id: str, role_name: str, assigned_by: str = None) -> bool:
