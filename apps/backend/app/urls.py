@@ -1,14 +1,14 @@
 """
 URL configuration for Unpuzzle MVP project.
 """
-# from django.contrib import admin  # Temporarily disabled due to Supabase schema conflicts
+from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from . import views, websocket_views
 
 urlpatterns = [
-    # path('admin/', admin.site.urls),  # Temporarily disabled
+    path('admin/', admin.site.urls),
     
     # System endpoints
     path('health/', views.health_check, name='health_check'),

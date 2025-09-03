@@ -40,8 +40,11 @@ print(ALLOWED_HOSTS)
 
 # Application definition
 INSTALLED_APPS = [
-    'django.contrib.contenttypes',
+    'django.contrib.admin',
     'django.contrib.auth',  # Required by Django/DRF but not used for authentication
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
@@ -62,8 +65,11 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'app.middleware.trailing_slash.SmartTrailingSlashMiddleware',  # Smart trailing slash handler
+    'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    # 'django.middleware.csrf.CsrfViewMiddleware',  # Disabled for API
+    'django.middleware.csrf.CsrfViewMiddleware',  # Re-enabled for admin
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
     'app.middleware.supabase_auth.SupabaseAuthMiddleware',  # Custom Supabase auth
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
