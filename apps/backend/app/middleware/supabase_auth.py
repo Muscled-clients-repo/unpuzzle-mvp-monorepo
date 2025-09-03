@@ -50,6 +50,7 @@ class SupabaseAuthMiddleware:
             '/health/',  # Health check
             '/static/',
             '/media/',
+            '/admin/',
         ]
         
         # Add API root endpoint check separately to avoid conflicts
