@@ -2,9 +2,12 @@
 Custom authentication backend for Django REST Framework that works with Supabase.
 This simply uses the user data already validated and attached by SupabaseAuthMiddleware.
 """
+import time
 from rest_framework.authentication import BaseAuthentication
+from django.core.cache import cache
 from accounts.models import UserProfile
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +37,43 @@ class SupabaseAuthentication(BaseAuthentication):
         
         logger.info(f"SupabaseAuth: Authenticating user_id: {request.user_id}")
         
+        # Check if we already have the user profile attached to the request by middleware
+        if hasattr(request, '_cached_user_profile'):
+            logger.debug(f"SupabaseAuth: Using cached UserProfile from request")
+            return (request._cached_user_profile, None)
+        
         try:
-            # Try to get existing UserProfile
-            user_profile = UserProfile.objects.get(supabase_user_id=request.user_id)
-            logger.info(f"SupabaseAuth: Found UserProfile for {user_profile.email}")
+            # Try to get UserProfile from cache first
+            cache_key = f"user_profile_auth:{request.user_id}"
+            cached_profile = cache.get(cache_key)
+            
+            if cached_profile is not None:
+                logger.debug(f"SupabaseAuth: Cache HIT for UserProfile {cached_profile.email}")
+                # Attach to request for subsequent calls in same request
+                request._cached_user_profile = cached_profile
+                return (cached_profile, None)
+            
+            # Cache miss - query database with optimized query
+            logger.debug(f"SupabaseAuth: Cache MISS - querying database")
+            start_time = time.time()
+            
+            user_profile = UserProfile.objects.select_related(
+                'subscription',
+                'subscription__plan'
+            ).prefetch_related(
+                'user_roles__role'
+            ).get(supabase_user_id=request.user_id)
+            
+            query_time = (time.time() - start_time) * 1000
+            logger.debug(f"SupabaseAuth: Database query took {query_time:.2f}ms")
+            
+            # Cache the profile for 15 minutes
+            cache.set(cache_key, user_profile, 900)
+            
+            # Attach to request for subsequent calls in same request
+            request._cached_user_profile = user_profile
+            
+            logger.info(f"SupabaseAuth: Found and cached UserProfile for {user_profile.email}")
             return (user_profile, None)
             
         except UserProfile.DoesNotExist:
@@ -58,7 +94,14 @@ class SupabaseAuthentication(BaseAuthentication):
                     status='active'
                 )
                 
-                logger.info(f"SupabaseAuth: Successfully created UserProfile for {email}")
+                # Cache the newly created profile
+                cache_key = f"user_profile_auth:{request.user_id}"
+                cache.set(cache_key, user_profile, 900)
+                
+                # Attach to request
+                request._cached_user_profile = user_profile
+                
+                logger.info(f"SupabaseAuth: Successfully created and cached UserProfile for {email}")
                 return (user_profile, None)
             
             # No Supabase data available - can't create profile

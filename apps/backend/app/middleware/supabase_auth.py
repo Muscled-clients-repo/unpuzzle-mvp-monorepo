@@ -86,18 +86,26 @@ class SupabaseAuthMiddleware:
         
         # Try to get cached JWT payload first
         start_time = time.time()
+        print(f"[AUTH DEBUG] Starting JWT verification for request")
+        
         payload = self._get_cached_jwt_payload(token)
         
         if payload is None:
             try:
                 # Verify JWT token (expensive operation)
+                jwt_start = time.time()
                 logger.debug("JWT cache miss - verifying token")
+                print(f"[AUTH DEBUG] JWT cache MISS - verifying token...")
+                
                 payload = jwt.decode(
                     token,
                     self.jwt_secret,
                     algorithms=['HS256'],
                     audience='authenticated'
                 )
+                
+                jwt_time = (time.time() - jwt_start) * 1000
+                print(f"[AUTH DEBUG] JWT verification took {jwt_time:.2f}ms")
                 
                 # Cache the verified payload
                 self._cache_jwt_payload(token, payload)
@@ -115,6 +123,8 @@ class SupabaseAuthMiddleware:
                 response.delete_cookie('auth_token')
                 return response
         else:
+            jwt_cache_time = (time.time() - start_time) * 1000
+            print(f"[AUTH DEBUG] JWT cache HIT - using cached payload ({jwt_cache_time:.2f}ms)")
             logger.debug("JWT cache hit - using cached payload")
         
         # Add user info to request
@@ -122,10 +132,15 @@ class SupabaseAuthMiddleware:
         request.user_id = payload.get('sub')
         
         # Pre-load user permissions and roles for the request (performance optimization)
+        preload_start = time.time()
+        print(f"[AUTH DEBUG] Starting permission preloading...")
         self._preload_user_permissions(request)
+        preload_time = (time.time() - preload_start) * 1000
+        print(f"[AUTH DEBUG] Permission preloading took {preload_time:.2f}ms")
         
         # Log performance for monitoring
         auth_time = (time.time() - start_time) * 1000  # Convert to ms
+        print(f"[AUTH DEBUG] Total auth middleware time: {auth_time:.2f}ms")
         logger.debug(f"Auth middleware took {auth_time:.2f}ms for user {payload.get('sub')}")
         
         response = self.get_response(request)

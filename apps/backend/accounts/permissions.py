@@ -148,10 +148,14 @@ class PermissionService:
     @staticmethod
     def get_user_permissions(user_id: str) -> List[str]:
         """Get all permissions for a user (cached with optimized database queries)"""
+        import time
+        start_time = time.time()
+        
         cache_key = f"user_permissions:{user_id}"
         permissions = cache.get(cache_key)
         
         if permissions is None:
+            print(f"[PERMISSION DEBUG] Cache MISS for user {user_id} - querying database")
             try:
                 # Optimized query to fetch user with all roles and permissions in one go
                 user_profile = UserProfile.objects.select_related().prefetch_related(
@@ -174,16 +178,25 @@ class PermissionService:
                 permissions = []
                 # Cache empty permissions for 2 minutes to avoid repeated DB queries
                 cache.set(cache_key, permissions, 120)
+        else:
+            print(f"[PERMISSION DEBUG] Cache HIT for user {user_id}")
+        
+        elapsed_time = (time.time() - start_time) * 1000
+        print(f"[PERMISSION DEBUG] get_user_permissions took {elapsed_time:.2f}ms")
                 
         return permissions
     
     @staticmethod
     def get_user_roles(user_id: str) -> List[str]:
         """Get all active role names for a user (cached)"""
+        import time
+        start_time = time.time()
+        
         cache_key = f"user_roles:{user_id}"
         roles = cache.get(cache_key)
         
         if roles is None:
+            print(f"[ROLE DEBUG] Cache MISS for user {user_id} - querying database")
             try:
                 user_profile = UserProfile.objects.prefetch_related(
                     'user_roles__role'
@@ -198,6 +211,11 @@ class PermissionService:
             except UserProfile.DoesNotExist:
                 roles = []
                 cache.set(cache_key, roles, 120)
+        else:
+            print(f"[ROLE DEBUG] Cache HIT for user {user_id}")
+        
+        elapsed_time = (time.time() - start_time) * 1000
+        print(f"[ROLE DEBUG] get_user_roles took {elapsed_time:.2f}ms")
                 
         return roles
 
