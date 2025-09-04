@@ -112,8 +112,19 @@ export async function getCourse(courseId: string) {
     }
     
     const result = await response.json()
-    console.log('[API-SERVER] Successfully fetched course:', result.title || courseId)
-    return result
+    
+    // Django returns { success: true, data: {...} } format
+    const courseData = result.data || result
+    
+    console.log('[API-SERVER] Successfully fetched course:', courseData.title || courseId)
+    console.log('[API-SERVER] Course data structure:', {
+      hasDataWrapper: !!result.data,
+      title: courseData.title,
+      price: courseData.price,
+      instructor: courseData.instructor?.full_name || courseData.instructor?.display_name
+    })
+    
+    return courseData
   } catch (error) {
     console.error('[API-SERVER] Error fetching course:', error)
     return null
