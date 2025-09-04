@@ -7,9 +7,10 @@ import { Metadata } from "next"
 export async function generateMetadata({ 
   params 
 }: { 
-  params: { id: string } 
+  params: Promise<{ id: string }> 
 }): Promise<Metadata> {
-  const course = await getCourse(params.id)
+  const { id } = await params
+  const course = await getCourse(id)
   
   if (!course) {
     return {
@@ -34,10 +35,13 @@ export async function generateMetadata({
 export default async function CoursePreviewPage({
   params
 }: {
-  params: { id: string }
+  params: Promise<{ id: string }>
 }) {
+  // Await params before accessing properties (Next.js 15 requirement)
+  const { id } = await params
+  
   // Fetch course data on the server
-  const course = await getCourse(params.id)
+  const course = await getCourse(id)
   
   console.log('[SSR] Course data fetched from server:', {
     id: course?.id,
@@ -58,5 +62,5 @@ export default async function CoursePreviewPage({
   }
 
   // Pass the server-fetched data to the client component
-  return <CourseDetailClient initialCourse={course} courseId={params.id} />
+  return <CourseDetailClient initialCourse={course} courseId={id} />
 }

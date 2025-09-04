@@ -45,6 +45,9 @@ class SupabaseAuthMiddleware:
             '/api/v1/auth/oauth/signin',  # OAuth sign in
             '/api/v1/auth/oauth/callback/',  # OAuth callback
             '/api/v1/auth/oauth/providers',  # Get OAuth providers
+            '/api/v1/stats/platform/',  # Platform statistics (public)
+            '/api/v1/stats/featured-courses/',  # Featured courses (public)
+            '/api/v1/courses/featured/',  # Featured courses alternative endpoint
             '/api/v1/payments/config/stripe/',  # Stripe config endpoint
             '/api/v1/payments/webhooks/stripe/',  # Stripe webhook endpoint
             '/health/',  # Health check
@@ -133,11 +136,13 @@ class SupabaseAuthMiddleware:
         request.user_id = payload.get('sub')
         
         # Pre-load user permissions and roles for the request (performance optimization)
-        preload_start = time.time()
-        print(f"[AUTH DEBUG] Starting permission preloading...")
-        self._preload_user_permissions(request)
-        preload_time = (time.time() - preload_start) * 1000
-        print(f"[AUTH DEBUG] Permission preloading took {preload_time:.2f}ms")
+        # Skip for OAuth callback to avoid timeout issues
+        if not request.path.startswith('/api/v1/auth/oauth/callback'):
+            preload_start = time.time()
+            print(f"[AUTH DEBUG] Starting permission preloading...")
+            self._preload_user_permissions(request)
+            preload_time = (time.time() - preload_start) * 1000
+            print(f"[AUTH DEBUG] Permission preloading took {preload_time:.2f}ms")
         
         # Log performance for monitoring
         auth_time = (time.time() - start_time) * 1000  # Convert to ms
@@ -236,14 +241,33 @@ class SupabaseAuthMiddleware:
         """
         Pre-load user permissions and roles to avoid multiple database queries per request
         """
+        import signal
+        from contextlib import contextmanager
+        
+        @contextmanager
+        def timeout(duration):
+            def handler(signum, frame):
+                raise TimeoutError("Permission preload timed out")
+            signal.signal(signal.SIGALRM, handler)
+            signal.alarm(duration)
+            try:
+                yield
+            finally:
+                signal.alarm(0)
+        
         try:
             from accounts.permissions import PermissionService
             
             user_id = request.user_id
             if user_id:
-                # Load permissions and roles once for the entire request
-                # These will be cached, so subsequent calls will be fast
-                permissions = PermissionService.get_user_permissions(user_id)
+                # Load permissions with a 2-second timeout to prevent hanging
+                try:
+                    with timeout(2):
+                        # Load permissions and roles once for the entire request
+                        # These will be cached, so subsequent calls will be fast
+                        permissions = PermissionService.get_user_permissions(user_id)
+                except TimeoutError:
+                    logger.warning(f"Permission preload timed out for user {user_id}")
                 roles = PermissionService.get_user_roles(user_id)
                 
                 # Attach to request for fast access in views

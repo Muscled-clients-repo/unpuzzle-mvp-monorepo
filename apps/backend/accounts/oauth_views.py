@@ -163,10 +163,15 @@ def oauth_callback(request):
             )
         
         # Prepare response with optimized query
-        # Prefetch roles to avoid N+1 queries
-        profile = UserProfile.objects.prefetch_related(
-            'user_roles__role'
-        ).get(pk=profile.pk)
+        # Prefetch roles to avoid N+1 queries (with timeout handling)
+        try:
+            profile = UserProfile.objects.prefetch_related(
+                'user_roles__role'
+            ).get(pk=profile.pk)
+        except Exception as e:
+            print(f'[OAUTH-DJANGO] Error fetching profile with roles: {str(e)}')
+            # Fallback to basic profile without prefetch if database is slow
+            profile = UserProfile.objects.get(pk=profile.pk)
         
         # Serialize with roles included
         profile_data = UserProfileSerializer(profile).data
