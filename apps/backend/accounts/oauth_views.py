@@ -87,8 +87,9 @@ def oauth_callback(request):
     Handle OAuth callback and exchange code for session.
     The database trigger automatically creates UserProfile.
     """
-    # Get code from either POST body or GET query params
+    # Get code and next parameter from either POST body or GET query params
     code = request.data.get('code') if request.method == 'POST' else request.GET.get('code')
+    next_url = request.data.get('next') if request.method == 'POST' else request.GET.get('next')
     
     if not code:
         return Response(
@@ -108,6 +109,14 @@ def oauth_callback(request):
         
         user_data = result['user']
         session_data = result['session']
+        
+        # Debug log to see what Supabase returns
+        print(f'[OAUTH-DJANGO] Session data from Supabase:')
+        print(f'  - Has access_token: {bool(session_data.get("access_token") if session_data else False)}')
+        print(f'  - Has refresh_token: {bool(session_data.get("refresh_token") if session_data else False)}')
+        print(f'  - Has expires_in: {bool(session_data.get("expires_in") if session_data else False)}')
+        if session_data:
+            print(f'  - Session keys: {list(session_data.keys())}')
         
         # Get UserProfile (created automatically by database trigger)
         try:
@@ -153,18 +162,22 @@ def oauth_callback(request):
                 role_name=RoleConstants.STUDENT
             )
         
-        # Prepare response
-        profile.refresh_from_db()
+        # Prepare response with optimized query
+        # Prefetch roles to avoid N+1 queries
+        profile = UserProfile.objects.prefetch_related(
+            'user_roles__role'
+        ).get(pk=profile.pk)
+        
+        # Serialize with roles included
         profile_data = UserProfileSerializer(profile).data
         
-        # Add roles
-        user_roles = profile.user_roles.select_related('role').values_list('role__name', flat=True)
-        profile_data['roles'] = list(user_roles)
-        
+        # Always return JSON response for API calls
+        # The frontend will handle the redirect
         response_data = {
             'user': profile_data,
             'session': session_data,
-            'success': True
+            'success': True,
+            'redirect_url': next_url if next_url else '/'
         }
         
         response = Response(response_data, status=status.HTTP_200_OK)

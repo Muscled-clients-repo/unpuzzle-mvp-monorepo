@@ -2,7 +2,7 @@
 Serializers for authentication and user management.
 """
 from rest_framework import serializers
-from .models import UserProfile
+from .models import UserProfile, Role, UserRole
 
 
 class SignUpSerializer(serializers.Serializer):
@@ -72,8 +72,25 @@ class PasswordResetSerializer(serializers.Serializer):
         return value.lower()
 
 
+class RoleSerializer(serializers.ModelSerializer):
+    """Serializer for Role with permissions"""
+    class Meta:
+        model = Role
+        fields = ['id', 'name', 'description', 'permissions']
+        
+
+class UserRoleSerializer(serializers.ModelSerializer):
+    """Serializer for UserRole with nested role details"""
+    role = RoleSerializer(read_only=True)
+    
+    class Meta:
+        model = UserRole
+        fields = ['role', 'assigned_by', 'created_at']
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
-    """Optimized serializer for user profile (avoids database queries from properties)"""
+    """Optimized serializer for user profile with roles and permissions"""
+    roles = serializers.SerializerMethodField()
     
     class Meta:
         model = UserProfile
@@ -92,14 +109,31 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'last_login',
             'email_verified',
             'created_at',
-            'updated_at'
+            'updated_at',
+            'roles'  # Now includes full role objects with permissions
         ]
         read_only_fields = [
             'supabase_user_id',
             'email',
             'email_verified',
             'created_at',
-            'updated_at'
+            'updated_at',
+            'roles'
+        ]
+    
+    def get_roles(self, obj):
+        """Get user roles with permissions as array of objects"""
+        # Use select_related to optimize database queries
+        user_roles = obj.user_roles.select_related('role').filter(role__is_active=True)
+        return [
+            {
+                'id': ur.role.id,
+                'name': ur.role.name,
+                'description': ur.role.description,
+                'permissions': ur.role.permissions,
+                'assigned_at': ur.created_at
+            }
+            for ur in user_roles
         ]
     
     def to_representation(self, instance):

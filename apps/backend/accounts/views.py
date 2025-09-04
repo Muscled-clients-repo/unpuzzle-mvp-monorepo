@@ -125,13 +125,13 @@ def sign_up(request):
                 role_name=RoleConstants.STUDENT
             )
         
-        # Get updated user profile with role information
-        profile.refresh_from_db()
-        profile_data = UserProfileSerializer(profile).data
+        # Get updated user profile with optimized query for roles
+        profile = UserProfile.objects.prefetch_related(
+            'user_roles__role'
+        ).get(pk=profile.pk)
         
-        # Add role information to response
-        user_roles = profile.user_roles.select_related('role').values_list('role__name', flat=True)
-        profile_data['roles'] = list(user_roles)
+        # Serialize with roles included (roles are now part of the serializer)
+        profile_data = UserProfileSerializer(profile).data
         
         response_data = {
             'user': profile_data,
@@ -178,9 +178,11 @@ def sign_in(request):
                 status=status.HTTP_401_UNAUTHORIZED
             )
         
-        # Get UserProfile (should exist via database trigger)
+        # Get UserProfile with optimized query (should exist via database trigger)
         try:
-            profile = UserProfile.objects.get(supabase_user_id=result['user']['id'])
+            profile = UserProfile.objects.prefetch_related(
+                'user_roles__role'
+            ).get(supabase_user_id=result['user']['id'])
         except UserProfile.DoesNotExist:
             return Response({
                 'error': 'User profile not found. User may not be properly synced.',

@@ -1,81 +1,34 @@
+'use client'
+
 import Link from "next/link"
-import { Suspense } from "react"
+import { useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Header } from "@/components/layout/header"
 import { Footer } from "@/components/layout/footer"
 import { AICourseCard } from "@/components/course/ai-course-card"
 import { MetricWidget } from "@/components/dashboard/metrics-widget"
 import { AgentCard } from "@/components/ai/agent-card"
-import { getFeaturedCourses, getPlatformStats } from "@/lib/api-server"
-import { ArrowRight, Sparkles, Brain, Target } from "lucide-react"
-import { CourseGridSkeleton } from "@/components/common/CourseCardSkeleton"
+import { ArrowRight, Sparkles, Brain, Target, BookOpen } from "lucide-react"
+import { useAppStore } from "@/stores/app-store"
 
-// Revalidate every hour
-export const revalidate = 3600
-
-async function FeaturedCourses() {
-  const courses = await getFeaturedCourses(6)
-  
-  if (!courses || courses.length === 0) {
-    return (
-      <div className="text-center py-8">
-        <p className="text-muted-foreground">No featured courses available</p>
-      </div>
-    )
-  }
-  
-  return (
-    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-      {courses.map((course: any) => (
-        <AICourseCard
-          key={course.id}
-          course={course}
-          variant="default"
-        />
-      ))}
-    </div>
-  )
+interface HomePageClientProps {
+  featuredCourses: any[]
+  platformStats: any
 }
 
-async function PlatformStats() {
-  const stats = await getPlatformStats()
+export function HomePageClient({ featuredCourses, platformStats }: HomePageClientProps) {
+  // Access the store - data will be synced by DataSyncProvider
+  const storedCourses = useAppStore(state => state.courses)
+  const user = useAppStore(state => state.profile)
   
-  // Don't render if we couldn't get stats
-  if (!stats || stats.total_courses === 0) {
-    return null
-  }
-  
-  return (
-    <div className="grid gap-4 md:grid-cols-4">
-      <MetricWidget
-        title="Active Learners"
-        value={stats.active_learners?.toLocaleString() || '0'}
-        change={stats.learners_change || '+0%'}
-        icon={<Brain className="h-4 w-4" />}
-      />
-      <MetricWidget
-        title="Courses Available"
-        value={stats.total_courses?.toLocaleString() || '0'}
-        change={stats.courses_change || '+0%'}
-        icon={<BookOpen className="h-4 w-4" />}
-      />
-      <MetricWidget
-        title="Completion Rate"
-        value={`${stats.completion_rate || 0}%`}
-        change={stats.completion_change || '+0%'}
-        icon={<Target className="h-4 w-4" />}
-      />
-      <MetricWidget
-        title="AI Interactions"
-        value={stats.ai_interactions?.toLocaleString() || '0'}
-        change={stats.interactions_change || '+0%'}
-        icon={<Sparkles className="h-4 w-4" />}
-      />
-    </div>
-  )
-}
+  // Optional: You can also directly update the store here if needed
+  useEffect(() => {
+    // The data is already synced by DataSyncProvider
+    // But you can access it from the store for any client-side operations
+    console.log('Featured courses synced to store:', storedCourses)
+    console.log('Current user from SSR:', user)
+  }, [storedCourses, user])
 
-export default async function HomePage() {
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
@@ -141,36 +94,75 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <section className="bg-muted py-16">
-          <div className="container px-4">
-            <h2 className="mb-4 text-center text-3xl font-bold">
-              Platform Statistics
-            </h2>
-            <p className="mb-12 text-center text-muted-foreground">
-              Join thousands of learners accelerating their education
-            </p>
-            <Suspense fallback={<div className="animate-pulse">Loading stats...</div>}>
-              <PlatformStats />
-            </Suspense>
-          </div>
-        </section>
+        {platformStats && platformStats.total_courses > 0 && (
+          <section className="bg-muted py-16">
+            <div className="container px-4">
+              <h2 className="mb-4 text-center text-3xl font-bold">
+                Platform Statistics
+              </h2>
+              <p className="mb-12 text-center text-muted-foreground">
+                Join thousands of learners accelerating their education
+              </p>
+              <div className="grid gap-4 md:grid-cols-4">
+                <MetricWidget
+                  title="Active Learners"
+                  value={platformStats.active_learners?.toLocaleString() || '0'}
+                  change={platformStats.learners_change || '+0%'}
+                  icon={<Brain className="h-4 w-4" />}
+                />
+                <MetricWidget
+                  title="Courses Available"
+                  value={platformStats.total_courses?.toLocaleString() || '0'}
+                  change={platformStats.courses_change || '+0%'}
+                  icon={<BookOpen className="h-4 w-4" />}
+                />
+                <MetricWidget
+                  title="Completion Rate"
+                  value={`${platformStats.completion_rate || 0}%`}
+                  change={platformStats.completion_change || '+0%'}
+                  icon={<Target className="h-4 w-4" />}
+                />
+                <MetricWidget
+                  title="AI Interactions"
+                  value={platformStats.ai_interactions?.toLocaleString() || '0'}
+                  change={platformStats.interactions_change || '+0%'}
+                  icon={<Sparkles className="h-4 w-4" />}
+                />
+              </div>
+            </div>
+          </section>
+        )}
 
         <section className="py-16">
           <div className="container px-4">
             <h2 className="mb-12 text-center text-3xl font-bold">
               Featured Courses
             </h2>
-            <Suspense fallback={<CourseGridSkeleton count={6} />}>
-              <FeaturedCourses />
-            </Suspense>
-            <div className="mt-8 text-center">
-              <Button variant="outline" size="lg" asChild>
-                <Link href="/courses">
-                  View All Courses
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Link>
-              </Button>
-            </div>
+            {featuredCourses && featuredCourses.length > 0 ? (
+              <>
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                  {featuredCourses.map((course: any) => (
+                    <AICourseCard
+                      key={course.id}
+                      course={course}
+                      variant="default"
+                    />
+                  ))}
+                </div>
+                <div className="mt-8 text-center">
+                  <Button variant="outline" size="lg" asChild>
+                    <Link href="/courses">
+                      View All Courses
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">No featured courses available</p>
+              </div>
+            )}
           </div>
         </section>
 
@@ -198,6 +190,3 @@ export default async function HomePage() {
     </div>
   )
 }
-
-// Add missing import
-import { BookOpen } from "lucide-react"

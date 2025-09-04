@@ -15,7 +15,7 @@ interface UserState {
 }
 
 interface UserActions {
-  setUser: (profile: User) => void
+  setUser: (profile: User | null) => void
   updatePreferences: (preferences: Partial<UIPreferences>) => void
   updateProgress: (courseId: string, progress: Partial<CourseProgress>) => void
   useAiInteraction: () => boolean
@@ -121,10 +121,11 @@ export const createUserSlice: StateCreator<UserSlice> = (set, get) => ({
   ...initialUserState,
   studentData: initialStudentData,
 
-  setUser: (profile: User) => 
+  setUser: (profile: User | null) => 
     set(() => ({
-      id: profile.id,
+      id: profile?.id || null,
       profile,
+      isLoading: false, // Always set loading to false when setting user data
     })),
 
   updatePreferences: (preferences: Partial<UIPreferences>) =>
@@ -296,19 +297,15 @@ export const createUserSlice: StateCreator<UserSlice> = (set, get) => ({
       }
       
       if (response.data && response.status === 200) {
-        const loginData = response.data as any
-        
-        // Store only the auth token - user profile will be fetched separately
-        if (loginData.token || loginData.access_token) {
-          localStorage.setItem('authToken', loginData.token || loginData.access_token)
-        }
+        // NOTE: We now use HTTP-only cookies instead of localStorage for security
+        // Tokens are set by Django backend or Next.js API routes as secure cookies
+        console.log('[USER-SLICE] Login successful, tokens handled by server cookies')
         
         set({ isLoading: false })
         
-        // Fetch user profile from server using the stored token
-        await get().initializeAuth()
-        
-        console.log('✅ Login successful - token stored and profile fetched from server')
+        // Profile will be fetched by SSR on the next page load via SessionProvider
+        console.log('[CLIENT-AUTH] Login successful - profile will be synced from SSR')
+        console.log('✅ Login successful - token stored, profile will come from SSR')
         return { success: true }
       }
       
@@ -343,82 +340,16 @@ export const createUserSlice: StateCreator<UserSlice> = (set, get) => ({
   },
   
   initializeAuth: async () => {
-    try {
-      // Check if we have a stored token (for OAuth)
-      const token = localStorage.getItem('authToken') || 
-                   localStorage.getItem('access_token') || 
-                   localStorage.getItem('token') ||
-                   sessionStorage.getItem('authToken')
-      
-      if (token) {
-        console.log('🔐 Found auth token, fetching user profile...')
-      } else {
-        console.log('🔐 No auth token found, checking cookie-based authentication...')
-      }
-      
-      // Always try to fetch user profile - server will handle both token and cookie auth
-      
-      // Try to get current user from API
-      const response = await apiClient.getCurrentUser()
-      
-      if (response.data && response.status === 200) {
-        const userData = response.data as any
-        
-        // Transform backend user data to our User type
-        const user: User = {
-          id: userData.id || userData._id || 'unknown',
-          name: userData.name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || userData.username || 'User',
-          email: userData.email || 'user@example.com',
-          role: userData.role || 'student',
-          avatar: userData.avatar || userData.profilePicture || `https://api.dicebear.com/7.x/avataaars/png?seed=${userData.email}`,
-          createdAt: userData.createdAt || new Date().toISOString(),
-          updatedAt: userData.updatedAt || new Date().toISOString(),
-          subscription: userData.subscription || {
-            plan: 'basic',
-            status: 'active',
-            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-            features: {
-              maxCoursesPerMonth: 3,
-              aiInteractionsPerDay: 10,
-              downloadableResources: true,
-              certificateAccess: true,
-              prioritySupport: false
-            }
-          }
-        }
-        
-        // Store user in state
-        set({
-          id: user.id,
-          profile: user,
-          isLoading: false
-        })
-        
-        console.log('✅ Auth initialized for:', user.email)
-      } else if (response.status === 401) {
-        // Not authenticated (neither token nor cookie valid)
-        console.log('🔐 Not authenticated - no valid token or cookie session')
-        // Only clear tokens if they exist (don't clear cookies as they're HTTP-only)
-        if (token) {
-          localStorage.removeItem('authToken')
-          sessionStorage.removeItem('authToken')
-        }
-        set({ isLoading: false })
-      } else {
-        // Other error responses
-        console.log('🔐 Failed to fetch user profile, status:', response.status)
-        set({ isLoading: false })
-      }
-    } catch (error) {
-      console.error('❌ Auth initialization error:', error)
-      // Only clear tokens if they exist (cookies are managed by server)
-      const storedToken = localStorage.getItem('authToken') || sessionStorage.getItem('authToken')
-      if (storedToken) {
-        localStorage.removeItem('authToken')
-        sessionStorage.removeItem('authToken')
-      }
-      set({ isLoading: false })
-    }
+    console.log('[CLIENT-AUTH] initializeAuth called - DISABLED for SSR-only profile fetching')
+    console.log('[CLIENT-AUTH] User profile should come from SSR via SessionProvider')
+    console.log('[CLIENT-AUTH] If you need user data, ensure it comes from server-side getServerSession()')
+    
+    // DISABLED: Client-side profile fetching is now handled by SSR
+    // The SessionProvider automatically syncs server-side user data to the store
+    // This prevents unnecessary client-side API calls and ensures consistency
+    
+    // Profile data will be provided by SSR via SessionProvider
+    // No need to make client-side API calls
   },
 
   loadStudentData: () => {

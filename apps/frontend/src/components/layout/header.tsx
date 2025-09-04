@@ -2,10 +2,14 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
+import { useSession } from "@/components/providers/SessionProvider"
 import { useAppStore } from "@/stores/app-store"
+import { logoutAction } from "@/lib/logout-action"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Bell, Search, User, Menu, Eye, Settings as SettingsIcon, LogOut, MessageCircle, GraduationCap, UserCheck, ChevronLeft } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Bell, Search, User, Menu, Eye, Settings as SettingsIcon, LogOut, MessageCircle, GraduationCap, ChevronLeft } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,14 +31,34 @@ interface HeaderProps {
 
 export function Header({ backButton }: HeaderProps) {
   const router = useRouter()
+  const { session } = useSession()
   const { profile, isAuthenticated, logout, isLoading } = useAppStore()
+  const [hasHydrated, setHasHydrated] = useState(false)
   
-  // Get user from store
-  const user = isAuthenticated() ? profile : null
+  // Track hydration to avoid SSR mismatch
+  useEffect(() => {
+    setHasHydrated(true)
+  }, [])
   
-  const handleLogout = () => {
-    logout()
-    router.push('/login')
+  // Use SSR session data first, fallback to store data
+  const user = session?.user || (isAuthenticated() ? profile : null)
+  const userIsAuthenticated = !!user
+  
+  // Show loading state during hydration or when store is loading
+  const showLoading = !hasHydrated || isLoading
+  
+  const handleLogout = async () => {
+    try {
+      // Clear client-side store first
+      logout()
+      
+      // Then use server action to clear HTTP-only cookies and redirect
+      await logoutAction()
+    } catch (error) {
+      console.error('Logout error:', error)
+      // Fallback: redirect to home page even if server action fails
+      router.push('/')
+    }
   }
   
   return (
@@ -93,10 +117,13 @@ export function Header({ backButton }: HeaderProps) {
 
           <ThemeToggle />
           
-          {isLoading ? (
-            // Show nothing or a skeleton while loading
-            <div className="w-20 h-8" />
-          ) : user ? (
+          {showLoading ? (
+            // Show skeleton while loading user profile or during hydration
+            <>
+              <Skeleton className="h-8 w-8 rounded-md" />
+              <Skeleton className="h-8 w-8 rounded-full" />
+            </>
+          ) : userIsAuthenticated ? (
             <>
               <Button variant="ghost" size="icon">
                 <Bell className="h-5 w-5" />
@@ -111,7 +138,9 @@ export function Header({ backButton }: HeaderProps) {
                 <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuLabel>
                     <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-medium leading-none">{user.name || 'User'}</p>
+                      <p className="text-sm font-medium leading-none">
+                        {(user as any).fullName || (user as any).name || 'User'}
+                      </p>
                       <p className="text-xs leading-none text-muted-foreground">
                         {user.email || 'user@example.com'}
                       </p>

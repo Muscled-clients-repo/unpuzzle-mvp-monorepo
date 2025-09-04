@@ -28,6 +28,7 @@ function LoginContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const returnUrl = searchParams.get('returnUrl')
+  const oauthError = searchParams.get('error')
   
   // Get auth functions from Zustand store
   const { login, signup, profile, isAuthenticated } = useAppStore()
@@ -43,6 +44,17 @@ function LoginContent() {
   const [success, setSuccess] = useState('')
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState('')
   const [showEmailConfirmation, setShowEmailConfirmation] = useState(false)
+
+  // Handle OAuth errors from SSR callback
+  useEffect(() => {
+    if (oauthError) {
+      setError(decodeURIComponent(oauthError))
+      // Clear the error from URL after showing it
+      const url = new URL(window.location.href)
+      url.searchParams.delete('error')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [oauthError])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

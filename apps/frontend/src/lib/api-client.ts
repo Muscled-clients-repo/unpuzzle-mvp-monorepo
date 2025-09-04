@@ -36,18 +36,12 @@ class ApiClient {
     try {
       console.log('🌐 API GET:', `${this.baseUrl}${endpoint}`)
       
-      // Get auth token if available
-      const token = localStorage.getItem('authToken') || sessionStorage.getItem('authToken')
-      
+      // NOTE: We now use HTTP-only cookies instead of Authorization headers
+      // The 'credentials: include' option below automatically sends cookies
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         ...options?.headers,
-      }
-      
-      // Add authorization header if token exists
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
       }
       
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -285,18 +279,12 @@ class ApiClient {
     }
     
     try {
-      // Get auth token if available
-      const token = localStorage.getItem('authToken') || sessionStorage.getItem('authToken')
-      
+      // NOTE: We now use HTTP-only cookies instead of Authorization headers
+      // The 'credentials: include' option below automatically sends cookies
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         ...options?.headers,
-      }
-      
-      // Add authorization header if token exists
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
       }
       
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -337,18 +325,12 @@ class ApiClient {
     }
     
     try {
-      // Get auth token if available
-      const token = localStorage.getItem('authToken') || sessionStorage.getItem('authToken')
-      
+      // NOTE: We now use HTTP-only cookies instead of Authorization headers
+      // The 'credentials: include' option below automatically sends cookies
       const headers: HeadersInit = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         ...options?.headers,
-      }
-      
-      // Add authorization header if token exists
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`
       }
       
       const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -526,24 +508,19 @@ class ApiClient {
   async login(email: string, password: string) {
     const response = await this.post('/api/v1/auth/login', { email, password })
     
-    // Store token if login successful
+    // NOTE: We now use HTTP-only cookies instead of localStorage for security
+    // Django backend or Next.js API routes set secure cookies automatically
     if (response.data && response.status === 200) {
-      const data = response.data as any
-      if (data.token) {
-        // Store token in localStorage for persistent auth
-        localStorage.setItem('authToken', data.token)
-        // Also store in sessionStorage for current session
-        sessionStorage.setItem('authToken', data.token)
-      }
+      console.log('[API-CLIENT] Login successful, tokens handled by server cookies')
     }
     
     return response
   }
 
   async logout() {
-    // Clear tokens
-    localStorage.removeItem('authToken')
-    sessionStorage.removeItem('authToken')
+    // NOTE: We now use HTTP-only cookies instead of localStorage
+    // Cookies are cleared by Django backend or Next.js logout action
+    console.log('[API-CLIENT] Logout called, cookies cleared by server')
     
     // Call logout endpoint if it exists
     try {
@@ -557,8 +534,16 @@ class ApiClient {
   }
 
   async getCurrentUser() {
-    // Server uses httpOnly cookies for authentication - no token check needed
-    return this.get('/api/v1/auth/profile/')
+    console.log('[API-CLIENT] getCurrentUser() called - DISABLED for SSR-only profile fetching')
+    console.log('[API-CLIENT] User profile should come from SSR via getServerSession()')
+    
+    // DISABLED: Client-side profile fetching is now handled by SSR
+    // Return a disabled response to prevent API calls
+    return {
+      status: 418, // I'm a teapot - indicates this endpoint is intentionally disabled
+      error: 'Client-side profile fetching is disabled. Use SSR via getServerSession() instead.',
+      data: null
+    }
   }
 
   async signup(data: {

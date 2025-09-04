@@ -23,6 +23,7 @@ urlpatterns = [
     # API endpoints
     path('api/v1/auth/', include('accounts.urls', namespace='auth')),
     path('api/v1/user/', include('accounts.urls', namespace='user')),  # Alias for frontend compatibility
+    path('api/v1/stats/', include('courses.urls_stats')),  # Platform statistics (public)
     path('api/v1/media/', include('media_library.urls')),  # Media upload and management
     path('api/v1/content/', include('courses.urls_content')),  # Content management endpoints
     path('api/v1/payments/', include('payments.urls')),  # Payment and Stripe integration

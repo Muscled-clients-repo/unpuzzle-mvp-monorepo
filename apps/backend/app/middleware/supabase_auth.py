@@ -43,7 +43,7 @@ class SupabaseAuthMiddleware:
             '/api/v1/auth/refresh-token',  # Alternative naming
             '/api/v1/auth/reset-password',
             '/api/v1/auth/oauth/signin',  # OAuth sign in
-            '/api/v1/auth/oauth/callback',  # OAuth callback
+            '/api/v1/auth/oauth/callback/',  # OAuth callback
             '/api/v1/auth/oauth/providers',  # Get OAuth providers
             '/api/v1/payments/config/stripe/',  # Stripe config endpoint
             '/api/v1/payments/webhooks/stripe/',  # Stripe webhook endpoint

@@ -238,9 +238,25 @@ class OAuthService {
 
   async initiateSignIn(provider: string, redirectUrl?: string): Promise<OAuthResponse> {
     try {
+      // Use API route for callback URL to handle cookies properly
+      let callbackUrl = redirectUrl || `${window.location.origin}/api/auth/oauth-callback`
+      
+      // Get stored return URL from sessionStorage
+      const storedReturnUrl = sessionStorage.getItem('oauth_return_url')
+      if (storedReturnUrl) {
+        // Add next parameter to callback URL
+        const url = new URL(callbackUrl)
+        url.searchParams.set('next', storedReturnUrl)
+        callbackUrl = url.toString()
+        console.log('[OAUTH-SERVICE] Adding next parameter to API callback URL:', callbackUrl)
+        
+        // Clear sessionStorage since we're passing it via URL now
+        sessionStorage.removeItem('oauth_return_url')
+      }
+      
       const response = await apiClient.post(`${this.baseUrl}/signin/`, {
         provider,
-        redirect_url: redirectUrl || `${window.location.origin}/auth/callback`
+        redirect_url: callbackUrl
       })
       
       const data = response.data as any
@@ -293,7 +309,7 @@ class OAuthService {
     try {
       const response = await apiClient.post(`${this.baseUrl}/identities/link/`, {
         provider,
-        redirect_url: redirectUrl || `${window.location.origin}/settings/linked-accounts`
+        redirect_url: redirectUrl || `${window.location.origin}/api/auth/oauth-callback?next=/settings/linked-accounts`
       })
       
       const data = response.data as any
@@ -317,17 +333,11 @@ class OAuthService {
     }
   }
 
-  private storeTokens(session: any): void {
-    // Store tokens in localStorage for persistence
-    if (session.access_token) {
-      localStorage.setItem('access_token', session.access_token)
-    }
-    if (session.refresh_token) {
-      localStorage.setItem('refresh_token', session.refresh_token)
-    }
-    if (session.expires_at) {
-      localStorage.setItem('token_expires_at', session.expires_at.toString())
-    }
+  private storeTokens(_session: any): void {
+    // NOTE: We now use HTTP-only cookies instead of localStorage for security
+    // This method is kept for backward compatibility but doesn't store anything
+    // Tokens are set as cookies by Django backend or Next.js API route
+    console.log('[OAUTH-SERVICE] Token storage handled by server-side cookies (not localStorage)')
   }
 
   generateState(): string {
